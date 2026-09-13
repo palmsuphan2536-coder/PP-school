@@ -1,0 +1,6 @@
+{
+  "name": "ระบบจัดการ ปพ.5 ออนไลน์ โรงเรียนวัดราษฎร์ศรัทธาธรรม",
+  "description": "ระบบจัดการ ปพ.5 และงานทะเบียนผลการเรียน เวลาเรียน บันทึกคะแนน และออกเอกสารแบบครบวงจร โรงเรียนวัดราษฎร์ศรัทธาธรรม",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
