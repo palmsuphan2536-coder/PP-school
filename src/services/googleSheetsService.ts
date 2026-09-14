@@ -6,6 +6,7 @@ import {
   SchoolInfo, Student, Subject, SubjectGradingSummary, AttendanceRecord, 
   Teacher, Classroom, AcademicYear, Term, UserAccount, ScoreRecord, ScoreComponent 
 } from '../types';
+import type { AppState } from './storageService';
 
 export const OAUTH_CLIENT_ID = '55073752947-m08s937t71f63m3q1som90mhs370as66.apps.googleusercontent.com';
 export const DEFAULT_LINKED_EMAIL = 'rst72010045@gmail.com';
@@ -550,6 +551,188 @@ export const backupToGoogleSheets = async (
 
   saveStoredBackupInfo(backupInfo);
   return backupInfo;
+};
+
+// Fetch entire app state from Google Sheets spreadsheet
+export const fetchAppStateFromGoogleSheets = async (
+  spreadsheetId?: string,
+  linkedEmail: string = DEFAULT_LINKED_EMAIL
+): Promise<Partial<AppState> | null> => {
+  try {
+    const sId = spreadsheetId || getStoredBackupInfo()?.spreadsheetId;
+    if (!sId) return null;
+
+    let token = getStoredAccessToken();
+    if (!token) {
+      token = await requestGoogleAccessToken(linkedEmail);
+    }
+
+    // Fetch ranges for sheets: 1_ข้อมูลสถานศึกษา, 2_ทะเบียนนักเรียน, 3_รายวิชา, 6_ครูและบุคลากร, 7_บัญชีผู้ใช้
+    const ranges = [
+      "'1_ข้อมูลสถานศึกษา_ภาพรวม'!A1:Z50",
+      "'2_ทะเบียนนักเรียน'!A1:Z1000",
+      "'3_รายวิชา'!A1:Z500",
+      "'6_ครูและบุคลากร'!A1:Z500",
+      "'7_บัญชีผู้ใช้และรหัสผ่าน'!A1:Z500"
+    ];
+
+    const resp = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sId}/values:batchGet?${ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&')}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!resp.ok) {
+      throw new Error('ไม่สามารถดึงข้อมูลจาก Google Sheets ได้');
+    }
+
+    const data = await resp.json();
+    const valueRanges = data.valueRanges || [];
+
+    const partialState: Partial<AppState> = {};
+
+    // 1. School Info from Sheet 1
+    const schoolRows = valueRanges[0]?.values as string[][] | undefined;
+    if (schoolRows && schoolRows.length > 1) {
+      const schoolInfo: any = {};
+      schoolRows.forEach(row => {
+        const key = (row[0] || '').trim();
+        const val = (row[1] || '').trim();
+        if (key.includes('ชื่อโรงเรียน')) schoolInfo.nameTH = val;
+        if (key.includes('School Name')) schoolInfo.nameEN = val;
+        if (key.includes('รหัสสถานศึกษา')) schoolInfo.schoolCode = val;
+        if (key.includes('สังกัด')) schoolInfo.district = val;
+        if (key.includes('จังหวัด')) schoolInfo.province = val;
+      });
+      if (Object.keys(schoolInfo).length > 0) {
+        partialState.schoolInfo = schoolInfo;
+      }
+    }
+
+    // 2. Students from Sheet 2
+    const studentRows = valueRanges[1]?.values as string[][] | undefined;
+    if (studentRows && studentRows.length > 1) {
+      const students: Student[] = studentRows.slice(1)
+        .filter(r => r && r[1] && r[1].trim())
+        .map((r, idx) => ({
+          id: `std-sheet-${idx + 1}-${Date.now()}`,
+          studentCode: (r[1] || '').trim(),
+          nationalId: (r[2] || '').trim(),
+          studentNumber: idx + 1,
+          title: (r[3] || '').trim(),
+          firstName: (r[4] || '').trim(),
+          lastName: (r[5] || '').trim(),
+          gender: (((r[6] || '').trim() === 'ชาย' || (r[6] || '').trim() === 'M') ? 'M' : 'F') as any,
+          birthDate: (r[7] || '').trim(),
+          level: 'ม.3',
+          classroomId: (r[8] || '').trim() || 'room-m3-1',
+          classroomName: 'ม.3/1',
+          academicYearId: 'ay-2569',
+          status: 'active' as any
+        }));
+      if (students.length > 0) {
+        partialState.students = students;
+      }
+    }
+
+    // 3. Subjects from Sheet 3
+    const subjectRows = valueRanges[2]?.values as string[][] | undefined;
+    if (subjectRows && subjectRows.length > 1) {
+      const subjects: Subject[] = subjectRows.slice(1)
+        .filter(r => r && r[1] && r[1].trim())
+        .map((r, idx) => ({
+          id: `sub-sheet-${idx + 1}-${Date.now()}`,
+          code: (r[1] || '').trim(),
+          name: (r[2] || '').trim(),
+          department: 'กลุ่มสาระการเรียนรู้',
+          level: 'ม.3',
+          credits: parseFloat(r[5] || '1.0') || 1.0,
+          totalHours: parseInt(r[6] || '40', 10) || 40,
+          termNumber: 1,
+          academicYearId: 'ay-2569',
+          type: ((r[4] || '').trim() === 'รายวิชาเพิ่มเติม' ? 'additional' : 'basic') as any
+        }));
+      if (subjects.length > 0) {
+        partialState.subjects = subjects;
+      }
+    }
+
+    // 4. Teachers from Sheet 6
+    const teacherRows = valueRanges[3]?.values as string[][] | undefined;
+    if (teacherRows && teacherRows.length > 1) {
+      const teachers: Teacher[] = teacherRows.slice(1)
+        .filter(r => r && r[1] && r[1].trim())
+        .map((r, idx) => ({
+          id: `tch-sheet-${idx + 1}-${Date.now()}`,
+          teacherCode: `T${100 + idx}`,
+          title: (r[1] || '').trim() || 'นาย',
+          firstName: (r[2] || '').trim(),
+          lastName: (r[3] || '').trim(),
+          email: (r[4] || '').trim(),
+          phone: (r[5] || '').trim(),
+          position: (r[6] || '').trim() || 'ครูผู้สอน',
+          department: (r[7] || '').trim() || 'กลุ่มสาระฯ',
+          username: `teacher${idx + 1}`,
+          role: 'teacher' as any,
+          status: 'active' as any
+        }));
+      if (teachers.length > 0) {
+        partialState.teachers = teachers;
+      }
+    }
+
+    // 5. User Accounts from Sheet 7
+    const userRows = valueRanges[4]?.values as string[][] | undefined;
+    if (userRows && userRows.length > 1) {
+      const roleMap: Record<string, string> = {
+        'ผู้ดูแลระบบสูงสุด (Super Admin)': 'super_admin',
+        'งานวิชาการและทะเบียน (Academic)': 'academic',
+        'ครูประจำชั้น (Homeroom)': 'homeroom',
+        'ครูผู้สอน (Teacher)': 'teacher',
+        'ฝ่ายบริหาร (Executive)': 'executive'
+      };
+      const userAccounts: UserAccount[] = userRows.slice(1)
+        .filter(r => r && r[1] && r[1].trim())
+        .map((r, idx) => {
+          const username = (r[1] || '').trim();
+          const password = (r[2] || '').trim();
+          const name = (r[3] || '').trim();
+          const rawRole = (r[4] || '').trim();
+          const position = (r[5] || '').trim();
+          const email = (r[6] || '').trim();
+          const department = (r[7] || '').trim();
+          const rawStatus = (r[8] || '').trim();
+          const description = (r[9] || '').trim();
+
+          const role = (roleMap[rawRole] || (rawRole.toLowerCase().includes('admin') ? 'super_admin' : 'teacher')) as any;
+          const status = rawStatus.includes('ระงับ') || rawStatus === 'inactive' ? 'inactive' : 'active';
+
+          return {
+            id: `usr-sheet-${username}-${idx + 1}`,
+            username,
+            password: password || '123456',
+            name: name || username,
+            role,
+            position: position || 'บุคลากรทางการศึกษา',
+            email: email === '-' ? '' : email,
+            department: department === '-' ? '' : department,
+            status,
+            description: description === '-' ? '' : description
+          };
+        });
+      if (userAccounts.length > 0) {
+        partialState.userAccounts = userAccounts;
+      }
+    }
+
+    return partialState;
+  } catch (err) {
+    console.warn('Error fetching full state from Google Sheets:', err);
+    return null;
+  }
 };
 
 // Fetch user accounts directly from Sheet 7 (แผ่นงานที่ 7)

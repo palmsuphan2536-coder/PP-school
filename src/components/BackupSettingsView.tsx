@@ -20,7 +20,8 @@ import {
   getStoredBackupInfo,
   getLinkedEmail,
   DEFAULT_LINKED_EMAIL,
-  GoogleBackupInfo
+  GoogleBackupInfo,
+  fetchAppStateFromGoogleSheets
 } from '../services/googleSheetsService';
 import { SchoolLogoUploader } from './SchoolLogoUploader';
 import { AcademicYearManager } from './AcademicYearManager';
@@ -153,6 +154,52 @@ export const BackupSettingsView: React.FC<BackupSettingsViewProps> = ({
       setBackupErrorMsg(err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อและสำรองข้อมูล Google Sheets');
     } finally {
       setIsBackingUp(false);
+    }
+  };
+
+  const [isSyncingDown, setIsSyncingDown] = useState<boolean>(false);
+
+  // Fetch / Pull data directly from Google Sheets
+  const handleSyncFromGoogleSheets = async () => {
+    setIsSyncingDown(true);
+    setBackupSuccessMsg(null);
+    setBackupErrorMsg(null);
+
+    try {
+      const partialState = await fetchAppStateFromGoogleSheets(backupInfo?.spreadsheetId, linkedEmail);
+      if (!partialState) {
+        throw new Error('ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ หรือไม่พบสเปรดชีต');
+      }
+
+      // Merge into local storage or state
+      const current = {
+        schoolInfo,
+        academicYears,
+        terms,
+        gradingRules,
+        classrooms,
+        subjects,
+        teachers,
+        students,
+        subjectGradings,
+        attendanceRecords,
+        backupLogs,
+        userAccounts
+      };
+
+      const merged = {
+        ...current,
+        ...partialState
+      };
+
+      localStorage.setItem('WATRAT_PP5_DB_V1', JSON.stringify(merged));
+      setBackupSuccessMsg('ดึงข้อมูลล่าสุดจาก Google Sheets มาใช้ในระบบเรียบร้อยแล้ว!');
+      onRefreshData();
+    } catch (err: any) {
+      console.error('Fetch from Google Sheets error:', err);
+      setBackupErrorMsg(err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets');
+    } finally {
+      setIsSyncingDown(false);
     }
   };
 
@@ -365,15 +412,27 @@ export const BackupSettingsView: React.FC<BackupSettingsViewProps> = ({
                 </div>
               </div>
 
-              <a
-                href={backupInfo.spreadsheetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-xs transition flex items-center gap-1.5 self-start md:self-auto border border-indigo-200"
-              >
-                <span>เปิดดูสเปรดชีตใน Google Sheets</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+              <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+                <button
+                  type="button"
+                  onClick={handleSyncFromGoogleSheets}
+                  disabled={isSyncingDown}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition flex items-center gap-1.5 border border-emerald-700 shadow-2xs disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDown ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingDown ? 'กำลังดึงข้อมูล...' : 'ดึงข้อมูลล่าสุดจาก Google Sheets'}</span>
+                </button>
+
+                <a
+                  href={backupInfo.spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-xs transition flex items-center gap-1.5 border border-indigo-200"
+                >
+                  <span>เปิดดูสเปรดชีต</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
             </div>
           )}
 
