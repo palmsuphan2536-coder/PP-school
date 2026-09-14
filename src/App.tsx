@@ -12,7 +12,7 @@ import {
   calculateGPA, recordAudit, addNotification 
 } from './services/storageService';
 import { 
-  backupToGoogleSheets, getStoredBackupInfo, getLinkedEmail 
+  backupToGoogleSheets, getStoredBackupInfo, getLinkedEmail, fetchUserAccountsFromGoogleSheets 
 } from './services/googleSheetsService';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
@@ -35,6 +35,7 @@ import { AuditLogModal } from './components/AuditLogModal';
 import { NotificationModal } from './components/NotificationModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { LoginView } from './components/LoginView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   // Load persisted state
@@ -49,15 +50,8 @@ export default function App() {
     }
   });
 
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    try {
-      const savedAuth = localStorage.getItem('WATRAT_PP5_AUTH');
-      return savedAuth !== 'false';
-    } catch {
-      return true;
-    }
-  });
+  // Authentication State - Always start at login screen when opening web app
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   const handleToggleSidebarCollapse = () => {
     setIsSidebarCollapsed(prev => {
@@ -108,20 +102,6 @@ export default function App() {
     setAppState(prev => {
       const next = updater(prev);
       saveAppState(next);
-
-      // Real-time auto-sync to Google Sheets if a spreadsheet is linked
-      try {
-        const stored = getStoredBackupInfo();
-        if (stored?.spreadsheetId) {
-          if ((window as any).__sheetsSyncTimer) {
-            clearTimeout((window as any).__sheetsSyncTimer);
-          }
-          (window as any).__sheetsSyncTimer = setTimeout(() => {
-            handleTriggerSheetsBackup().catch(() => {});
-          }, 2000);
-        }
-      } catch {}
-
       return next;
     });
   };
@@ -214,30 +194,138 @@ export default function App() {
 
   // --- Handlers for Attendance ---
   const handleSaveAttendance = (records: AttendanceRecord[]) => {
+    if (!records || records.length === 0) return;
+    const first = records[0];
+
     updateStateAndPersist(prev => {
-      const otherRecords = prev.attendanceRecords.filter(
-        ar => !(ar.classroomId === records[0]?.classroomId && 
-                ar.date === records[0]?.date && 
-                ar.type === records[0]?.type)
-      );
+      const otherRecords = prev.attendanceRecords.filter(ar => {
+        if (ar.date !== first.date || ar.type !== first.type) return true;
+        if (ar.classroomId !== first.classroomId) return true;
+        if (first.type === 'subject') {
+          return !(ar.subjectId === first.subjectId && ar.period === first.period);
+        }
+        return false;
+      });
+
+      const cls = prev.classrooms.find(c => c.id === first.classroomId);
+      const clsName = cls?.name || first.classroomId;
       const newAudit = recordAudit(
-        currentUser.id,
-        currentUser.name,
-        `บันทึกการเช็คชื่อ [${records[0]?.type}] วันที่ ${records[0]?.date}`,
+        prev.currentUser.id,
+        prev.currentUser.name,
+        `บันทึกการเช็คชื่อ [${first.type === 'daily' ? 'ประจำวัน' : 'รายวิชา'}] ห้อง ${clsName} วันที่ ${first.date} (${records.length} คน)`,
         'attendance',
-        records[0]?.classroomId || ''
+        first.classroomId || ''
+      );
+
+      const notif = addNotification(
+        'success',
+        `บันทึกเวลาเรียน ห้อง ${clsName}`,
+        `บันทึกเวลาเรียน ${records.length} คน วันที่ ${first.date} เรียบร้อยแล้ว`
       );
 
       return {
         ...prev,
         attendanceRecords: [...otherRecords, ...records],
-        auditLogs: [newAudit, ...prev.auditLogs].slice(0, 100)
+        auditLogs: [newAudit, ...prev.auditLogs].slice(0, 100),
+        notifications: [notif, ...prev.notifications].slice(0, 50)
       };
     });
   };
 
   // --- Handlers for Scores ---
-  const handleUpdateScore = (studentId: string, componentId: string, score: number) => {
+  const handleSaveScoresAndGradingsAndSyncSheets = async (
+    newRecords: ScoreRecord[],
+    newGradings: SubjectGradingSummary[]
+  ): Promise<{ success: boolean; sheetsSuccess: boolean; message: string; spreadsheetUrl?: string }> => {
+    let latestGradings: SubjectGradingSummary[] = [];
+    let latestRecords: ScoreRecord[] = [];
+
+    // 1. Update local storage & application state
+    updateStateAndPersist(prev => {
+      const recordMap = new Map<string, ScoreRecord>(prev.scoreRecords.map(r => [`${r.studentId}_${r.componentId}`, r]));
+      newRecords.forEach(r => recordMap.set(`${r.studentId}_${r.componentId}`, r));
+      latestRecords = Array.from(recordMap.values());
+
+      const gradingMap = new Map<string, SubjectGradingSummary>(prev.subjectGradings.map(g => [g.id, g]));
+      newGradings.forEach(g => {
+        const existingIdx = prev.subjectGradings.findIndex(
+          eg => eg.studentId === g.studentId && eg.subjectId === g.subjectId
+        );
+        if (existingIdx >= 0) {
+          gradingMap.delete(prev.subjectGradings[existingIdx].id);
+        }
+        gradingMap.set(g.id, g);
+      });
+      latestGradings = Array.from(gradingMap.values());
+
+      const subject = prev.subjects.find(s => s.id === newGradings[0]?.subjectId);
+      const classroom = prev.classrooms.find(c => c.id === newGradings[0]?.classroomId);
+
+      const newAudit = recordAudit(
+        currentUser?.id || 'admin',
+        currentUser?.name || 'ผู้ดูแลระบบ',
+        `บันทึกคะแนนและตัดเกรด วิชา ${subject?.code || ''} ห้อง ${classroom?.name || ''} (${newGradings.length} คน)`,
+        'score',
+        subject?.id || '',
+        null,
+        'saved'
+      );
+
+      const newNotif = addNotification(
+        'success',
+        `บันทึกคะแนนและตัดเกรดเรียบร้อย`,
+        `บันทึกผลการเรียนวิชา ${subject?.name || ''} ห้อง ${classroom?.name || ''} จำนวน ${newGradings.length} คน`
+      );
+
+      return {
+        ...prev,
+        scoreRecords: latestRecords,
+        subjectGradings: latestGradings,
+        auditLogs: [newAudit, ...prev.auditLogs].slice(0, 100),
+        notifications: [newNotif, ...prev.notifications].slice(0, 50)
+      };
+    });
+
+    // 2. Sync to Google Sheets
+    try {
+      const email = getLinkedEmail();
+      const stored = getStoredBackupInfo();
+      const backupResult = await backupToGoogleSheets(
+        {
+          schoolInfo: appState.schoolInfo,
+          students: appState.students,
+          subjects: appState.subjects,
+          subjectGradings: latestGradings,
+          attendanceRecords: appState.attendanceRecords,
+          teachers: appState.teachers,
+          classrooms: appState.classrooms,
+          academicYears: appState.academicYears,
+          terms: appState.terms,
+          userAccounts: appState.userAccounts,
+          scoreRecords: latestRecords,
+          scoreComponents: appState.scoreComponents
+        },
+        email,
+        stored?.spreadsheetId
+      );
+
+      return {
+        success: true,
+        sheetsSuccess: true,
+        message: 'บันทึกคะแนนและตัดเกรดลงระบบ พร้อมส่งไปยัง Google Sheets สำเร็จเรียบร้อยแล้ว',
+        spreadsheetUrl: backupResult.spreadsheetUrl
+      };
+    } catch (err: any) {
+      console.warn('Sync to Google Sheets encountered issue:', err);
+      return {
+        success: true,
+        sheetsSuccess: false,
+        message: `บันทึกข้อมูลคะแนนและเกรดในระบบเรียบร้อยแล้ว (การส่งไป Google Sheets: ${err?.message || 'โปรดตรวจสอบการเชื่อมต่อ'})`
+      };
+    }
+  };
+
+  const handleUpdateScore = (studentId: string, componentId: string, score: number | null) => {
     updateStateAndPersist(prev => {
       const student = prev.students.find(s => s.id === studentId);
       const component = prev.scoreComponents.find(c => c.id === componentId);
@@ -247,21 +335,27 @@ export default function App() {
       const oldScore = existing?.score ?? null;
 
       let newRecords = [...prev.scoreRecords];
+      const nowIso = new Date().toISOString();
       if (existing) {
         const idx = newRecords.indexOf(existing);
         newRecords[idx] = {
           ...existing,
           score,
-          updatedAt: new Date().toISOString(),
+          lastUpdated: nowIso,
+          updatedAt: nowIso,
           updatedBy: currentUser.name
         };
       } else {
         newRecords.push({
           id: `scr-${Date.now()}-${studentId}-${componentId}`,
           studentId,
+          subjectId: component?.subjectId || '',
           componentId,
           score,
-          updatedAt: new Date().toISOString(),
+          academicYearId: component?.academicYearId || 'ay-2569',
+          termId: component?.termId || 'term-ay-2569-1',
+          lastUpdated: nowIso,
+          updatedAt: nowIso,
           updatedBy: currentUser.name
         });
       }
@@ -417,16 +511,26 @@ export default function App() {
 
   // --- Handlers for Subjects ---
   const handleAddSubject = (s: Subject) => {
+    const tch = s.teacherId ? appState.teachers.find(t => t.id === s.teacherId) : null;
+    const resolvedSubject: Subject = {
+      ...s,
+      teacherName: s.teacherName || (tch ? `${tch.title || ''}${tch.firstName} ${tch.lastName}`.trim() : '')
+    };
     updateStateAndPersist(prev => ({
       ...prev,
-      subjects: [...prev.subjects, s]
+      subjects: [...prev.subjects, resolvedSubject]
     }));
   };
 
   const handleUpdateSubject = (s: Subject) => {
+    const tch = s.teacherId ? appState.teachers.find(t => t.id === s.teacherId) : null;
+    const resolvedSubject: Subject = {
+      ...s,
+      teacherName: s.teacherName || (tch ? `${tch.title || ''}${tch.firstName} ${tch.lastName}`.trim() : '')
+    };
     updateStateAndPersist(prev => ({
       ...prev,
-      subjects: prev.subjects.map(item => item.id === s.id ? s : item)
+      subjects: prev.subjects.map(item => item.id === s.id ? resolvedSubject : item)
     }));
   };
 
@@ -650,6 +754,34 @@ export default function App() {
     }));
   };
 
+  // Helper to sync user accounts directly to Sheet 7 on any add/update/delete
+  const syncUserAccountsToSheets = async (accountsToSync: UserAccount[]) => {
+    try {
+      const email = getLinkedEmail();
+      const stored = getStoredBackupInfo();
+      if (!stored?.spreadsheetId) return;
+
+      await backupToGoogleSheets(
+        {
+          schoolInfo: appState.schoolInfo,
+          students: appState.students,
+          subjects: appState.subjects,
+          subjectGradings: appState.subjectGradings,
+          attendanceRecords: appState.attendanceRecords,
+          teachers: appState.teachers,
+          classrooms: appState.classrooms,
+          academicYears: appState.academicYears,
+          terms: appState.terms,
+          userAccounts: accountsToSync
+        },
+        email,
+        stored.spreadsheetId
+      );
+    } catch (err) {
+      console.warn('Sync users to Sheet 7 warning:', err);
+    }
+  };
+
   // User Management Handlers (Super Admin CRUD & Sync to Sheet 7)
   const handleAddUserAccount = (newUser: Omit<UserAccount, 'id'>) => {
     updateStateAndPersist(prev => {
@@ -668,8 +800,14 @@ export default function App() {
       const notif = addNotification(
         'success',
         `เพิ่มผู้ใช้ ${createdUser.username} สำเร็จ`,
-        `กำหนดบทบาท ${createdUser.role} และบันทึกรหัสผ่านในระบบแล้ว`
+        `กำหนดบทบาท ${createdUser.role} และบันทึกลงแผ่นงานที่ 7 แล้ว`
       );
+
+      // Instantly sync to Google Sheets (Sheet 7)
+      setTimeout(() => {
+        syncUserAccountsToSheets(updatedAccounts);
+      }, 200);
+
       return {
         ...prev,
         userAccounts: updatedAccounts,
@@ -689,6 +827,11 @@ export default function App() {
         'auth',
         updatedUser.id
       );
+
+      setTimeout(() => {
+        syncUserAccountsToSheets(updatedAccounts);
+      }, 200);
+
       return {
         ...prev,
         userAccounts: updatedAccounts,
@@ -700,19 +843,26 @@ export default function App() {
   const handleDeleteUserAccount = (userId: string) => {
     updateStateAndPersist(prev => {
       const targetUser = (prev.userAccounts || []).find(u => u.id === userId);
+      const targetName = targetUser?.name || targetUser?.username || '';
       const updatedAccounts = (prev.userAccounts || []).filter(u => u.id !== userId);
       const newAudit = recordAudit(
         prev.currentUser.id,
         prev.currentUser.name,
-        `ลบบัญชีผู้ใช้งาน: ${targetUser?.username || userId}`,
+        `ลบบัญชีผู้ใช้งาน: ${targetUser?.username || userId} (ลบออกจากชีตที่ 7 ด้วย)`,
         'auth',
         userId
       );
       const notif = addNotification(
         'warning',
-        `ลบบัญชีผู้ใช้ ${targetUser?.username || ''} เรียบร้อยแล้ว`,
-        `บัญชีดังกล่าวไม่สามารถเข้าสู่ระบบได้อีกต่อไป`
+        `ลบบัญชีผู้ใช้ ${targetName} (${targetUser?.username || ''}) สำเร็จ`,
+        `ลบข้อมูลออกจากระบบและลบออกจากแผ่นงานที่ 7 (Google Sheet) เรียบร้อยแล้ว`
       );
+
+      // Instantly sync to Sheet 7 (batchClear wipes old rows and writes updated list)
+      setTimeout(() => {
+        syncUserAccountsToSheets(updatedAccounts);
+      }, 200);
+
       return {
         ...prev,
         userAccounts: updatedAccounts,
@@ -742,6 +892,11 @@ export default function App() {
         `รีเซ็ตรหัสผ่าน ${targetUser?.username || ''} เรียบร้อยแล้ว`,
         `รหัสผ่านใหม่ถูกบันทึกในระบบและพร้อมอัปเดตลงชีตที่ 7 ทันที`
       );
+
+      setTimeout(() => {
+        syncUserAccountsToSheets(updatedAccounts);
+      }, 200);
+
       return {
         ...prev,
         userAccounts: updatedAccounts,
@@ -852,6 +1007,35 @@ export default function App() {
     }
   };
 
+  // Pull latest accounts from Sheet 7
+  const handleRefreshUsersFromSheet = async (): Promise<{ success: boolean; count?: number; message?: string }> => {
+    try {
+      const accounts = await fetchUserAccountsFromGoogleSheets();
+      if (!accounts || accounts.length === 0) {
+        return {
+          success: false,
+          message: 'ไม่พบข้อมูลบัญชีผู้ใช้ในแผ่นงานที่ 7 หรือยังไม่ได้เชื่อมต่อ Google Sheets'
+        };
+      }
+
+      updateStateAndPersist(prev => ({
+        ...prev,
+        userAccounts: accounts
+      }));
+
+      return {
+        success: true,
+        count: accounts.length,
+        message: `ดึงข้อมูลบัญชีผู้ใช้จากแผ่นงานที่ 7 สำเร็จ (${accounts.length} บัญชี)`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจากแผ่นงานที่ 7'
+      };
+    }
+  };
+
   // Check At-Risk Students
   const atRiskList = getAtRiskStudents(students, attendanceRecords, subjectGradings, subjects);
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -861,7 +1045,10 @@ export default function App() {
     return (
       <LoginView
         schoolInfo={schoolInfo}
+        teachers={teachers}
+        userAccounts={userAccounts}
         onLogin={handleLogin}
+        onRefreshUsersFromSheet={handleRefreshUsersFromSheet}
       />
     );
   }
@@ -931,6 +1118,7 @@ export default function App() {
               classrooms={classrooms}
               subjects={subjects}
               students={students}
+              teachers={teachers}
               attendanceRecords={attendanceRecords}
               academicYears={academicYears}
               terms={terms}
@@ -942,21 +1130,24 @@ export default function App() {
           )}
 
           {activeTab === 'scores' && (
-            <ScoreEntryView
-              classrooms={classrooms}
-              subjects={subjects}
-              students={students}
-              scoreComponents={scoreComponents}
-              scoreRecords={scoreRecords}
-              subjectGradings={subjectGradings}
-              gradingRules={gradingRules}
-              schoolInfo={schoolInfo}
-              currentUser={currentUser}
-              onUpdateScore={handleUpdateScore}
-              onUpdateGradingSummary={handleUpdateGradingSummary}
-              onUpdateComponents={handleUpdateComponents}
-              onBatchUpdateGrading={handleBatchUpdateGrading}
-            />
+            <ErrorBoundary fallbackTitle="ระบบบันทึกคะแนนและตัดเกรด">
+              <ScoreEntryView
+                classrooms={classrooms}
+                subjects={subjects}
+                students={students}
+                scoreComponents={scoreComponents}
+                scoreRecords={scoreRecords}
+                subjectGradings={subjectGradings}
+                gradingRules={gradingRules}
+                schoolInfo={schoolInfo}
+                currentUser={currentUser}
+                onUpdateScore={handleUpdateScore}
+                onUpdateGradingSummary={handleUpdateGradingSummary}
+                onUpdateComponents={handleUpdateComponents}
+                onBatchUpdateGrading={handleBatchUpdateGrading}
+                onSaveScoresAndGradingsAndSyncSheets={handleSaveScoresAndGradingsAndSyncSheets}
+              />
+            </ErrorBoundary>
           )}
 
           {activeTab === 'pp5' && (
@@ -1018,6 +1209,7 @@ export default function App() {
           {activeTab === 'teachers' && (
             <TeachersView
               teachers={teachers}
+              classrooms={classrooms}
               onAddTeacher={handleAddTeacher}
               onUpdateTeacher={handleUpdateTeacher}
               onDeleteTeacher={handleDeleteTeacher}

@@ -10,7 +10,7 @@ import {
 } from '../types';
 import { exportPP6ToExcel } from '../services/storageService';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { captureSafeCanvas } from '../utils/pdfCanvas';
 
 interface PP6ViewProps {
   schoolInfo: SchoolInfo;
@@ -153,10 +153,8 @@ export const PP6View: React.FC<PP6ViewProps> = ({
       const pageEl = document.getElementById(`pp6-card-${activeStudent.id}`);
       if (!pageEl) throw new Error('ไม่พบองค์ประกอบหน้าเอกสาร');
 
-      const canvas = await html2canvas(pageEl, {
+      const canvas = await captureSafeCanvas(pageEl, {
         scale: 2,
-        useCORS: true,
-        allowTaint: true,
         backgroundColor: '#ffffff'
       });
 
@@ -207,10 +205,8 @@ export const PP6View: React.FC<PP6ViewProps> = ({
         }
 
         if (cardEl) {
-          const canvas = await html2canvas(cardEl, {
+          const canvas = await captureSafeCanvas(cardEl, {
             scale: 2,
-            useCORS: true,
-            allowTaint: true,
             backgroundColor: '#ffffff'
           });
 

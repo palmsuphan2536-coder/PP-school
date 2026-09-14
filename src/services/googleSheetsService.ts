@@ -4,7 +4,7 @@
 
 import { 
   SchoolInfo, Student, Subject, SubjectGradingSummary, AttendanceRecord, 
-  Teacher, Classroom, AcademicYear, Term, UserAccount 
+  Teacher, Classroom, AcademicYear, Term, UserAccount, ScoreRecord, ScoreComponent 
 } from '../types';
 
 export const OAUTH_CLIENT_ID = '55073752947-m08s937t71f63m3q1som90mhs370as66.apps.googleusercontent.com';
@@ -17,6 +17,7 @@ export interface GoogleBackupInfo {
   title: string;
   linkedEmail: string;
   lastBackupAt: string;
+  lastBackupTime?: string;
   itemCount: number;
 }
 
@@ -138,6 +139,8 @@ export interface BackupDataPayload {
   academicYears: AcademicYear[];
   terms: Term[];
   userAccounts?: UserAccount[];
+  scoreRecords?: ScoreRecord[];
+  scoreComponents?: ScoreComponent[];
 }
 
 // Convert school data into Google Sheets grid values
@@ -188,36 +191,48 @@ function buildSheetData(payload: BackupDataPayload) {
   const studentsData = [studentsHeader, ...studentsRows];
 
   // 3. Subjects Sheet
-  const subjectsHeader = ['รหัสวิชา', 'ชื่อวิชา', 'กลุ่มสาระการเรียนรู้', 'ระดับชั้น', 'หน่วยกิต', 'ชั่วโมงรวม', 'ประเภทวิชา'];
-  const subjectsRows = subjects.map(s => [
-    s.code,
-    s.name,
-    s.department,
-    s.level,
-    s.credits,
-    s.totalHours,
-    s.type === 'basic' ? 'วิชาพื้นฐาน' : 'วิชาเพิ่มเติม'
-  ]);
+  const subjectsHeader = ['รหัสวิชา', 'ชื่อวิชา', 'กลุ่มสาระการเรียนรู้', 'ระดับชั้น', 'หน่วยกิต', 'ชั่วโมงรวม', 'ประเภทวิชา', 'ครูผู้สอน'];
+  const subjectsRows = (subjects || []).map(s => {
+    const tch = s?.teacherId ? teachers.find(t => t.id === s.teacherId) : null;
+    const tchName = s?.teacherName || (tch ? `${tch.title || ''}${tch.firstName || ''} ${tch.lastName || ''}`.trim() : '-');
+    return [
+      s?.code || '-',
+      s?.name || '-',
+      s?.department || '-',
+      s?.level || '-',
+      s?.credits ?? 1,
+      s?.totalHours ?? 40,
+      s?.type === 'basic' ? 'วิชาพื้นฐาน' : 'วิชาเพิ่มเติม',
+      tchName || '-'
+    ];
+  });
   const subjectsData = [subjectsHeader, ...subjectsRows];
 
   // 4. Grades & Scores Sheet
   const gradesHeader = [
-    'รหัสวิชา', 'ชื่อวิชา', 'รหัสนักเรียน', 'ชื่อ-นามสกุล', 'คะแนนรวม (100)', 'เกรด (0-4)', 'สถานะการอนุมัติ', 'ผลการตัดสิน'
+    'รหัสวิชา', 'ชื่อวิชา', 'ห้องเรียน', 'เลขที่', 'เลขประจำตัว', 'ชื่อ-นามสกุล', 'คะแนนรวม (100)', 'เกรด (0-4)', 'สถานะการอนุมัติ', 'ผลการตัดสิน', 'ครูผู้สอน', 'หมายเหตุ'
   ];
   const gradesRows = subjectGradings.map(g => {
     const sbj = subjects.find(s => s.id === g.subjectId);
     const std = students.find(s => s.id === g.studentId);
+    const cls = classrooms.find(c => c.id === (g.classroomId || std?.classroomId));
+    const tch = sbj?.teacherId ? teachers.find(t => t.id === sbj.teacherId) : null;
+    const tchName = sbj?.teacherName || (tch ? `${tch.title}${tch.firstName} ${tch.lastName}` : '-');
     const studentName = std ? `${std.title}${std.firstName} ${std.lastName}` : g.studentId;
     const isPass = (Number(g.grade) >= 1 || g.grade === 'ผ');
     return [
       sbj?.code || '-',
       sbj?.name || '-',
+      cls?.name || '-',
+      std?.studentNumber ?? '-',
       std?.studentCode || g.studentId,
       studentName,
       g.totalScore ?? '-',
       g.grade ?? '-',
-      g.approvalStatus === 'approved' ? 'อนุมัติแล้ว' : (g.approvalStatus === 'locked' ? 'ปิดผลแล้ว' : 'ฉบับร่าง'),
-      isPass ? 'ผ่าน' : 'ไม่ผ่าน'
+      g.approvalStatus === 'approved' ? 'อนุมัติแล้ว' : (g.approvalStatus === 'locked' ? 'ปิดผลแล้ว' : (g.approvalStatus === 'submitted' ? 'ส่งตรวจ' : 'ฉบับร่าง')),
+      isPass ? 'ผ่าน' : 'ไม่ผ่าน',
+      tchName,
+      g.remarks || '-'
     ];
   });
   const gradesData = [gradesHeader, ...gradesRows];
@@ -420,6 +435,33 @@ export const backupToGoogleSheets = async (
     spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
   }
 
+  // Step 2.5: Clear existing rows so deleted items (e.g. deleted users in Sheet 7 or deleted records) are wiped clean
+  try {
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ranges: [
+            "'1_ข้อมูลสถานศึกษา_ภาพรวม'!A1:Z500",
+            "'2_ทะเบียนนักเรียน'!A1:Z1000",
+            "'3_รายวิชา'!A1:Z500",
+            "'4_คะแนนและผลการเรียน'!A1:Z2000",
+            "'5_เวลาเรียน'!A1:Z5000",
+            "'6_ครูและบุคลากร'!A1:Z500",
+            "'7_บัญชีผู้ใช้และรหัสผ่าน'!A1:Z500"
+          ]
+        })
+      }
+    );
+  } catch (clearErr) {
+    console.warn('Google Sheets batchClear warning:', clearErr);
+  }
+
   // Step 3: Populate data to sheets using batchUpdate values
   const dataBatches = [
     {
@@ -485,3 +527,76 @@ export const backupToGoogleSheets = async (
   saveStoredBackupInfo(backupInfo);
   return backupInfo;
 };
+
+// Fetch user accounts directly from Sheet 7 (แผ่นงานที่ 7)
+export const fetchUserAccountsFromGoogleSheets = async (
+  spreadsheetId?: string,
+  linkedEmail: string = DEFAULT_LINKED_EMAIL
+): Promise<UserAccount[] | null> => {
+  try {
+    const sId = spreadsheetId || getStoredBackupInfo()?.spreadsheetId;
+    if (!sId) return null;
+
+    const token = getStoredAccessToken();
+    if (!token) return null;
+
+    const resp = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sId}/values/'7_บัญชีผู้ใช้และรหัสผ่าน'!A2:J500`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!resp.ok) return null;
+
+    const data = await resp.json();
+    const rows = data.values as string[][] | undefined;
+    if (!rows || rows.length === 0) return [];
+
+    const roleMap: Record<string, string> = {
+      'ผู้ดูแลระบบสูงสุด (Super Admin)': 'super_admin',
+      'งานวิชาการและทะเบียน (Academic)': 'academic',
+      'ครูประจำชั้น (Homeroom)': 'homeroom',
+      'ครูผู้สอน (Teacher)': 'teacher',
+      'ฝ่ายบริหาร (Executive)': 'executive'
+    };
+
+    const accounts: UserAccount[] = rows
+      .filter(r => r && r[1] && r[1].trim()) // Must have username
+      .map((r, idx) => {
+        const username = (r[1] || '').trim();
+        const password = (r[2] || '').trim();
+        const name = (r[3] || '').trim();
+        const rawRole = (r[4] || '').trim();
+        const position = (r[5] || '').trim();
+        const email = (r[6] || '').trim();
+        const department = (r[7] || '').trim();
+        const rawStatus = (r[8] || '').trim();
+        const description = (r[9] || '').trim();
+
+        const role = (roleMap[rawRole] || (rawRole.toLowerCase().includes('admin') ? 'super_admin' : 'teacher')) as any;
+        const status = rawStatus.includes('ระงับ') || rawStatus === 'inactive' ? 'inactive' : 'active';
+
+        return {
+          id: `usr-sheet-${username}-${idx + 1}`,
+          username,
+          password: password || '123456',
+          name: name || username,
+          role,
+          position: position || 'บุคลากรทางการศึกษา',
+          email: email === '-' ? '' : email,
+          department: department === '-' ? '' : department,
+          status,
+          description: description === '-' ? '' : description
+        };
+      });
+
+    return accounts;
+  } catch (err) {
+    console.warn('Error fetching users from Sheet 7:', err);
+    return null;
+  }
+};
+

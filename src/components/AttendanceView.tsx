@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   CheckSquare, Calendar, Clock, UserCheck, AlertTriangle, 
   CheckCircle2, XCircle, QrCode, Save, Sparkles, Filter, 
@@ -7,19 +7,20 @@ import {
 } from 'lucide-react';
 import { 
   Classroom, Subject, Student, AttendanceRecord, AttendanceStatus, 
-  User, AcademicYear, Term 
+  User, AcademicYear, Term, Teacher 
 } from '../types';
 import { 
   exportTermAttendanceToExcel, 
   exportHomeroomDailyAttendanceToExcel 
 } from '../services/storageService';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { captureSafeCanvas } from '../utils/pdfCanvas';
 
 interface AttendanceViewProps {
   classrooms?: Classroom[];
   subjects?: Subject[];
   students?: Student[];
+  teachers?: Teacher[];
   attendanceRecords?: AttendanceRecord[];
   onSaveAttendance: (newRecords: AttendanceRecord[]) => void;
   currentUser?: User;
@@ -36,6 +37,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   classrooms = [],
   subjects = [],
   students = [],
+  teachers = [],
   attendanceRecords = [],
   onSaveAttendance,
   currentUser = { id: 'teacher-1', name: 'คุณครูผู้สอน', username: 'teacher', role: 'teacher' as const },
@@ -73,15 +75,24 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     setTimeout(() => setFeedbackToast(null), 3500);
   };
 
-  // Filter students for the selected classroom
+  const selectedClassroom = classrooms.find(c => c.id === selectedClassroomId) || classrooms[0];
+
+  // Helper to determine if a student is actively studying
+  const isStudentActive = (s: Student) => {
+    return s.status === 'studying' || s.status === 'transferred_in' || (s.status as any) === 'active' || !s.status || (s.status !== 'suspended' && s.status !== 'transferred_out' && s.status !== 'graduated');
+  };
+
+  // Filter students for the selected classroom robustly
   const classStudents = students
-    .filter(s => s.classroomId === selectedClassroomId && s.status === 'active')
-    .sort((a, b) => a.studentNumber - b.studentNumber);
+    .filter(s => (s.classroomId === selectedClassroomId || s.classroomName === selectedClassroom?.name || s.level === selectedClassroom?.name) && isStudentActive(s))
+    .sort((a, b) => (a.studentNumber || 0) - (b.studentNumber || 0));
 
   const selectedSubject = subjects.find(s => s.id === selectedSubjectId) || subjects[0];
-  const selectedClassroom = classrooms.find(c => c.id === selectedClassroomId) || classrooms[0];
   const currentYear = academicYears.find(y => y.id === selectedYearId) || academicYears[0];
   const currentTerm = terms.find(t => t.id === selectedTermId) || terms[0];
+
+  const homeroomTeacher = teachers.find(t => t.homeroomClassroomId === selectedClassroomId || t.homeroomClassroomId === selectedClassroom?.id);
+  const resolvedHomeroomTeacherName = selectedClassroom?.homeroomTeacherName || (homeroomTeacher ? `${homeroomTeacher.title || ''}${homeroomTeacher.firstName} ${homeroomTeacher.lastName}` : (currentUser?.name || 'ครูประจำชั้น'));
 
   const currentRecordType = activeTab === 'homeroom' ? 'daily' : 'subject';
 
@@ -92,7 +103,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       const existing = attendanceRecords.find(r => 
         r.type === currentRecordType &&
         r.date === selectedDate &&
-        r.classroomId === selectedClassroomId &&
+        (r.classroomId === selectedClassroomId || r.classroomId === selectedClassroom?.id) &&
         r.studentId === std.id &&
         (currentRecordType === 'daily' || (r.subjectId === selectedSubjectId && r.period === selectedPeriod))
       );
@@ -112,14 +123,18 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     period: number,
     date: string
   ) => {
-    const relevantStudents = students.filter(s => s.classroomId === classId && s.status === 'active');
+    const targetClass = classrooms.find(c => c.id === classId) || selectedClassroom;
+    const relevantStudents = students
+      .filter(s => (s.classroomId === classId || s.classroomName === targetClass?.name || s.level === targetClass?.name) && isStudentActive(s))
+      .sort((a, b) => (a.studentNumber || 0) - (b.studentNumber || 0));
+
     const map: Record<string, { status: AttendanceStatus; note: string }> = {};
 
     relevantStudents.forEach(std => {
       const existing = attendanceRecords.find(r => 
         r.type === type &&
         r.date === date &&
-        r.classroomId === classId &&
+        (r.classroomId === classId || r.classroomId === targetClass?.id) &&
         r.studentId === std.id &&
         (type === 'daily' || (r.subjectId === subjId && r.period === period))
       );
@@ -132,6 +147,18 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     setLocalStatuses(map);
     setSaveStatus('saved');
   };
+
+  // Keep selectedClassroomId in sync if empty
+  useEffect(() => {
+    if (!selectedClassroomId && classrooms.length > 0) {
+      setSelectedClassroomId(classrooms[0].id);
+    }
+  }, [classrooms, selectedClassroomId]);
+
+  // Keep local statuses synchronized when records, students, or filters change
+  useEffect(() => {
+    reloadStatuses(currentRecordType, selectedClassroomId, selectedSubjectId, selectedPeriod, selectedDate);
+  }, [selectedClassroomId, selectedSubjectId, selectedPeriod, selectedDate, currentRecordType, students, attendanceRecords]);
 
   const handleTabChange = (tab: 'homeroom' | 'subject' | 'summary') => {
     setActiveTab(tab);
@@ -186,6 +213,12 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     const now = new Date();
     const recordedAt = `${now.getFullYear() + 543}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
+    if (classStudents.length === 0) {
+      setSaveStatus('saved');
+      showToast('ไม่พบรายชื่อนักเรียนในห้องเรียนที่เลือก กรุณาเลือกห้องเรียนที่มีนักเรียน', 'error');
+      return;
+    }
+
     const newRecords: AttendanceRecord[] = classStudents.map(std => {
       const current = localStatuses[std.id] || { status: 'present', note: '' };
       return {
@@ -194,7 +227,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         date: selectedDate,
         period: currentRecordType === 'subject' ? selectedPeriod : undefined,
         subjectId: currentRecordType === 'subject' ? selectedSubjectId : undefined,
-        classroomId: selectedClassroomId,
+        classroomId: selectedClassroomId || selectedClassroom?.id || '',
         teacherId: currentUser?.id || 'teacher-1',
         studentId: std.id,
         status: current.status,
@@ -207,7 +240,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     onSaveAttendance(newRecords);
     setTimeout(() => {
       setSaveStatus('saved');
-      showToast('บันทึกข้อมูลการมาเรียนสำเร็จ');
+      showToast(`บันทึกข้อมูลการมาเรียนสำเร็จ (${newRecords.length} คน)`);
     }, 400);
   };
 
@@ -331,7 +364,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         selectedClassroom?.name || 'Class',
         selectedDate,
         rows,
-        selectedClassroom?.homeroomTeacherName || currentUser?.name || 'ครูประจำชั้น'
+        resolvedHomeroomTeacherName
       );
       showToast('ดาวน์โหลด Excel บันทึกเช็คชื่อของครูประจำชั้นเรียบร้อย');
     } catch (err) {
@@ -354,10 +387,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       setIsExportingPDF(true);
       showToast('กำลังจัดหน้า PDF แนวตั้ง A4...', 'success');
 
-      const canvas = await html2canvas(el, {
+      const canvas = await captureSafeCanvas(el, {
         scale: 2,
-        useCORS: true,
-        allowTaint: true,
         backgroundColor: '#ffffff'
       });
 
@@ -853,7 +884,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                   <div className="text-center space-y-2 border border-slate-300 p-3 rounded">
                     <div className="font-bold text-slate-800">ครูประจำชั้น / ครูผู้สอน</div>
                     <div className="pt-4 text-slate-400">ลงชื่อ.......................................................</div>
-                    <div>({selectedClassroom?.homeroomTeacherName || currentUser?.name || '...................................'})</div>
+                    <div>({resolvedHomeroomTeacherName})</div>
                     <div className="text-[9px] text-slate-500">วันที่ ......./......./.......</div>
                   </div>
 

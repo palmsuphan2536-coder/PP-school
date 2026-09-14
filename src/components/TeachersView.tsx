@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { GraduationCap, Plus, Search, Edit, Trash2, ShieldCheck, Mail, Phone } from 'lucide-react';
-import { Teacher, UserRole } from '../types';
+import { Teacher, UserRole, Classroom } from '../types';
 
 interface TeachersViewProps {
   teachers: Teacher[];
+  classrooms?: Classroom[];
   onAddTeacher: (teacher: Teacher) => void;
   onUpdateTeacher: (teacher: Teacher) => void;
   onDeleteTeacher: (teacherId: string) => void;
@@ -11,6 +12,7 @@ interface TeachersViewProps {
 
 export const TeachersView: React.FC<TeachersViewProps> = ({
   teachers,
+  classrooms = [],
   onAddTeacher,
   onUpdateTeacher,
   onDeleteTeacher,
@@ -148,6 +150,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                 <th className="py-3 px-3">ชื่อ - นามสกุล</th>
                 <th className="py-3 px-3">ตำแหน่ง</th>
                 <th className="py-3 px-3">กลุ่มสาระการเรียนรู้</th>
+                <th className="py-3 px-3 text-center">ครูประจำชั้น</th>
                 <th className="py-3 px-3 text-center">สิทธิ์ในระบบ</th>
                 <th className="py-3 px-3">การติดต่อ</th>
                 <th className="py-3 px-3 text-center w-24">จัดการ</th>
@@ -162,6 +165,15 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                   </td>
                   <td className="py-2.5 px-3 text-slate-600">{t.position}</td>
                   <td className="py-2.5 px-3 text-slate-600">{t.department}</td>
+                  <td className="py-2.5 px-3 text-center">
+                    {t.homeroomClassroomName ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        ห้อง {t.homeroomClassroomName}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">-</span>
+                    )}
+                  </td>
                   <td className="py-2.5 px-3 text-center">
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                       {roleLabel[t.role]}
@@ -278,6 +290,28 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                   onChange={(e) => setFormData({ ...formData, department: e.target.value })}
                   className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800"
                 />
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">ห้องประจำชั้น (Homeroom Class)</label>
+                <select
+                  value={formData.homeroomClassroomId || ''}
+                  onChange={(e) => {
+                    const clsId = e.target.value;
+                    const foundCls = classrooms.find(c => c.id === clsId);
+                    setFormData({
+                      ...formData,
+                      homeroomClassroomId: clsId,
+                      homeroomClassroomName: foundCls ? foundCls.name : ''
+                    });
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800"
+                >
+                  <option value="">-- ไม่ได้เป็นครูประจำชั้น --</option>
+                  {classrooms.map(c => (
+                    <option key={c.id} value={c.id}>ห้อง {c.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-2">

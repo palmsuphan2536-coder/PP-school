@@ -36,6 +36,7 @@ export interface AppState {
   subjectGradings: SubjectGradingSummary[];
   calendarEvents: CalendarEvent[];
   timetableSlots: TimetableSlot[];
+  timetable?: TimetableSlot[];
   attendanceRecords: AttendanceRecord[];
   gradingRules: GradingRule[];
   auditLogs: AuditLog[];
@@ -72,6 +73,7 @@ export function getDefaultState(): AppState {
     subjectGradings: initialSubjectGradings,
     calendarEvents: initialCalendarEvents,
     timetableSlots: initialTimetableSlots,
+    timetable: initialTimetableSlots,
     attendanceRecords: initialAttendanceRecords,
     gradingRules: initialGradingRules,
     auditLogs: initialAuditLogs,
@@ -121,16 +123,17 @@ export function loadAppState(): AppState {
         academicYears: Array.isArray(parsed.academicYears) && parsed.academicYears.length > 0 ? parsed.academicYears : defaultState.academicYears,
         terms: Array.isArray(parsed.terms) && parsed.terms.length > 0 ? parsed.terms : defaultState.terms,
         gradingRules: Array.isArray(parsed.gradingRules) && parsed.gradingRules.length > 0 ? parsed.gradingRules : defaultState.gradingRules,
-        classrooms: Array.isArray(parsed.classrooms) ? parsed.classrooms : defaultState.classrooms,
-        subjects: Array.isArray(parsed.subjects) ? parsed.subjects : defaultState.subjects,
-        teachers: Array.isArray(parsed.teachers) ? parsed.teachers : defaultState.teachers,
-        students: Array.isArray(parsed.students) ? parsed.students : defaultState.students,
+        classrooms: Array.isArray(parsed.classrooms) && parsed.classrooms.length > 0 ? parsed.classrooms : defaultState.classrooms,
+        subjects: Array.isArray(parsed.subjects) && parsed.subjects.length > 0 ? parsed.subjects : defaultState.subjects,
+        teachers: Array.isArray(parsed.teachers) && parsed.teachers.length > 0 ? parsed.teachers : defaultState.teachers,
+        students: Array.isArray(parsed.students) && parsed.students.length > 0 ? parsed.students : defaultState.students,
         teachingAssignments: Array.isArray(parsed.teachingAssignments) ? parsed.teachingAssignments : defaultState.teachingAssignments,
         scoreComponents: Array.isArray(parsed.scoreComponents) ? parsed.scoreComponents : defaultState.scoreComponents,
         scoreRecords: Array.isArray(parsed.scoreRecords) ? parsed.scoreRecords : defaultState.scoreRecords,
         subjectGradings: Array.isArray(parsed.subjectGradings) ? parsed.subjectGradings : defaultState.subjectGradings,
         attendanceRecords: Array.isArray(parsed.attendanceRecords) ? parsed.attendanceRecords : defaultState.attendanceRecords,
-        timetableSlots: Array.isArray(parsed.timetableSlots) ? parsed.timetableSlots : defaultState.timetableSlots,
+        timetableSlots: Array.isArray(parsed.timetableSlots) ? parsed.timetableSlots : (Array.isArray(parsed.timetable) ? parsed.timetable : defaultState.timetableSlots),
+        timetable: Array.isArray(parsed.timetable) ? parsed.timetable : (Array.isArray(parsed.timetableSlots) ? parsed.timetableSlots : defaultState.timetableSlots),
         calendarEvents: Array.isArray(parsed.calendarEvents) ? parsed.calendarEvents : defaultState.calendarEvents,
         auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : defaultState.auditLogs,
         notifications: Array.isArray(parsed.notifications) ? parsed.notifications : defaultState.notifications,
@@ -226,8 +229,9 @@ export function addNotification(
 }
 
 // Grade calculation helper based on configurable rules
-export function calculateGradeFromScore(score: number, rules: GradingRule[]): AcademicGrade {
-  const sortedRules = [...rules].sort((a, b) => b.minScore - a.minScore);
+export function calculateGradeFromScore(score: number, rules: GradingRule[] = []): AcademicGrade {
+  const effectiveRules = Array.isArray(rules) && rules.length > 0 ? rules : initialGradingRules;
+  const sortedRules = [...effectiveRules].sort((a, b) => b.minScore - a.minScore);
   for (const r of sortedRules) {
     if (score >= r.minScore) {
       return r.grade as AcademicGrade;
@@ -547,7 +551,73 @@ export function exportPP5ScoreSheetToExcel(
   safeDownloadExcelWorkbook(workbook, finalFilename);
 }
 
-export const exportPP5ToExcel = exportPP5ScoreSheetToExcel;
+/**
+ * ส่งออกข้อมูล ปพ.5 พร้อมรายชื่อครูผู้สอนเป็นไฟล์ Excel
+ */
+export function exportPP5ToExcel(
+  classroomName: string,
+  subjectCode: string,
+  subjectName: string,
+  rows: Array<{
+    studentNumber: number;
+    studentCode: string;
+    fullName: string;
+    attendanceHours?: number;
+    attendancePercent?: number;
+    beforeMidterm?: number;
+    midterm?: number;
+    afterMidterm?: number;
+    finalScore?: number;
+    totalScore?: number;
+    grade?: string | number;
+    passed?: boolean;
+    remarks?: string;
+  }>,
+  teacherName?: string
+) {
+  const safeTeacher = teacherName || 'ครูผู้สอนประจำรายวิชา';
+  const data = rows.map((r, idx) => ({
+    'ลำดับ': idx + 1,
+    'เลขที่': r.studentNumber,
+    'เลขประจำตัว': r.studentCode,
+    'ชื่อ-นามสกุล': r.fullName,
+    'เวลาเรียน (ชม.)': r.attendanceHours ?? '',
+    'ร้อยละเวลาเรียน': r.attendancePercent !== undefined ? `${r.attendancePercent}%` : '',
+    'คะแนนก่อนกลางภาค': r.beforeMidterm ?? '',
+    'คะแนนกลางภาค': r.midterm ?? '',
+    'คะแนนหลังกลางภาค': r.afterMidterm ?? '',
+    'คะแนนปลายภาค': r.finalScore ?? '',
+    'คะแนนรวม (100)': r.totalScore ?? '',
+    'ระดับผลการเรียน': r.grade ?? '',
+    'ผลการตัดสิน': r.passed ? 'ผ่าน' : 'ไม่ผ่าน',
+    'ครูผู้สอน': safeTeacher
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ 'ข้อมูล': 'ไม่มีข้อมูลผลการเรียน' }]);
+
+  worksheet['!cols'] = [
+    { wch: 8 },  // ลำดับ
+    { wch: 8 },  // เลขที่
+    { wch: 14 }, // เลขประจำตัว
+    { wch: 26 }, // ชื่อ-นามสกุล
+    { wch: 16 }, // เวลาเรียน
+    { wch: 16 }, // ร้อยละเวลาเรียน
+    { wch: 18 }, // คะแนนก่อนกลางภาค
+    { wch: 16 }, // คะแนนกลางภาค
+    { wch: 18 }, // คะแนนหลังกลางภาค
+    { wch: 16 }, // คะแนนปลายภาค
+    { wch: 16 }, // คะแนนรวม
+    { wch: 16 }, // ระดับผลการเรียน
+    { wch: 14 }, // ผลการตัดสิน
+    { wch: 24 }  // ครูผู้สอน
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  const safeSheetName = `${subjectCode}_${classroomName}`.replace(/[:\\/?*[\]]/g, '_').slice(0, 31);
+  XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName);
+  const finalFilename = `ปพ5_${subjectCode}_${classroomName}_${safeTeacher.replace(/\s+/g, '_')}.xlsx`;
+  safeDownloadExcelWorkbook(workbook, finalFilename);
+}
 
 /**
  * ส่งออกรายงานสรุปการมาเรียนรายภาคเป็นไฟล์ Excel

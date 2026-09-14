@@ -10,7 +10,7 @@ import {
 } from '../types';
 import { exportPP5ToExcel } from '../services/storageService';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { captureSafeCanvas } from '../utils/pdfCanvas';
 
 interface PP5ViewProps {
   schoolInfo: SchoolInfo;
@@ -65,16 +65,33 @@ export const PP5View: React.FC<PP5ViewProps> = ({
   const currentTerm = terms.find(t => t.id === selectedTermId) || terms[0];
 
   // Resolve teacher name for selected subject and classroom
+  // Priority 1: Direct teacher assignment on Subject (ครูผู้สอนที่ระบุไว้ในรายวิชา)
+  const subjectTeacherFromId = selectedSubject?.teacherId
+    ? teachers.find(tch => tch.id === selectedSubject.teacherId)
+    : null;
+
+  // Priority 2: Matching timetable slot
   const matchingTimetableSlot = timetable.find(
     t => t.subjectId === selectedSubjectId && t.classroomId === selectedClassroomId
   );
-  const assignedTeacher = matchingTimetableSlot 
+  const timetableTeacher = matchingTimetableSlot 
     ? teachers.find(tch => tch.id === matchingTimetableSlot.teacherId)
-    : teachers.find(tch => tch.department === selectedSubject?.department) || teachers[0];
+    : null;
 
-  const teacherName = assignedTeacher 
-    ? `${assignedTeacher.title || ''}${assignedTeacher.firstName} ${assignedTeacher.lastName}`.trim()
-    : (selectedSubject?.teacherName || 'ครูผู้สอนประจำรายวิชา');
+  // Priority 3: Teacher from same department or fallback
+  const departmentTeacher = teachers.find(tch => tch.department === selectedSubject?.department) || teachers[0];
+
+  const assignedTeacher = subjectTeacherFromId || timetableTeacher || departmentTeacher;
+
+  const teacherName = subjectTeacherFromId 
+    ? `${subjectTeacherFromId.title || ''}${subjectTeacherFromId.firstName} ${subjectTeacherFromId.lastName}`.trim()
+    : (selectedSubject?.teacherName 
+        ? selectedSubject.teacherName 
+        : (assignedTeacher 
+            ? `${assignedTeacher.title || ''}${assignedTeacher.firstName} ${assignedTeacher.lastName}`.trim()
+            : 'ครูผู้สอนประจำรายวิชา'));
+
+  const teacherPosition = assignedTeacher?.position || 'ครูผู้สอน';
 
   // Students in selected classroom sorted by student number
   const classStudents = students
@@ -226,11 +243,9 @@ export const PP5View: React.FC<PP5ViewProps> = ({
       for (let i = 0; i < pageElements.length; i++) {
         const pageEl = pageElements[i];
 
-        // Capture page in crisp 2x resolution
-        const canvas = await html2canvas(pageEl, {
+        // Capture page in crisp 2x resolution with safe color rendering
+        const canvas = await captureSafeCanvas(pageEl, {
           scale: 2,
-          useCORS: true,
-          allowTaint: true,
           backgroundColor: '#ffffff',
           logging: false
         });
@@ -373,7 +388,8 @@ export const PP5View: React.FC<PP5ViewProps> = ({
           totalScore: r.finalTotal,
           grade: r.grade,
           passed: r.finalTotal >= 50 && r.passedAttendance
-        }))
+        })),
+        teacherName
       );
       showToast('ส่งออกไฟล์ Excel (.xlsx) สำเร็จเรียบร้อย');
     } catch (err) {
@@ -586,7 +602,7 @@ export const PP5View: React.FC<PP5ViewProps> = ({
                     <span className="font-bold">ครูผู้สอน:</span> {teacherName || 'ครูผู้สอนประจำรายวิชา'}
                   </div>
                   <div>
-                    <span className="font-bold">ตำแหน่ง:</span> ครู วิทยฐานะชำนาญการ
+                    <span className="font-bold">ตำแหน่ง:</span> {teacherPosition}
                   </div>
                   <div className="col-span-2 pt-1">
                     <span className="font-bold">สถานศึกษา:</span> {schoolInfo.name} ({schoolInfo.affiliation || 'สังกัดสำนักงานคณะกรรมการการศึกษาขั้นพื้นฐาน'})
@@ -922,10 +938,18 @@ export const PP5View: React.FC<PP5ViewProps> = ({
 
                 {/* Teacher Comment Box */}
                 <div className="border border-slate-400 p-3 rounded mb-4 text-xs">
-                  <div className="font-bold text-slate-800 mb-1">๔. บันทึกข้อคิดเห็นของครูผู้สอน</div>
-                  <p className="text-[11px] text-slate-700 leading-relaxed">
+                  <div className="flex justify-between items-center mb-1">
+                    <div className="font-bold text-slate-800">๔. บันทึกข้อคิดเห็นของครูผู้สอน</div>
+                    <div className="text-[11px] font-semibold text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                      ครูผู้สอน: {teacherName}
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-700 leading-relaxed mb-3">
                     ผู้เรียนส่วนใหญ่มีความตั้งใจเรียน มีพัฒนาการทางด้านการเรียนรู้อย่างต่อเนื่อง บรรลุตามมาตรฐานและตัวชี้วัดของหลักสูตรแกนกลางการศึกษาขั้นพื้นฐาน พุทธศักราช ๒๕๕๑
                   </p>
+                  <div className="text-right text-[11px] text-slate-700">
+                    ลงชื่อ..........................................................ครูผู้สอน ({teacherName})
+                  </div>
                 </div>
               </div>
 

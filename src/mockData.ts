@@ -119,11 +119,11 @@ export const initialTeachers: Teacher[] = [
 ];
 
 export const initialSubjects: Subject[] = [
-  { id: 'sbj-sci31', code: 'ว23101', name: 'วิทยาศาสตร์ 5', department: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic' },
-  { id: 'sbj-math31', code: 'ค23101', name: 'คณิตศาสตร์พื้นฐาน 5', department: 'กลุ่มสาระการเรียนรู้คณิตศาสตร์', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic' },
-  { id: 'sbj-tha31', code: 'ท23101', name: 'ภาษาไทย 5', department: 'กลุ่มสาระการเรียนรู้ภาษาไทย', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic' },
-  { id: 'sbj-eng31', code: 'อ23101', name: 'ภาษาอังกฤษ 5', department: 'กลุ่มสาระการเรียนรู้ภาษาต่างประเทศ', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic' },
-  { id: 'sbj-soc31', code: 'ส23101', name: 'สังคมศึกษา 5', department: 'กลุ่มสาระการเรียนรู้สังคมศึกษาฯ', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic' },
+  { id: 'sbj-sci31', code: 'ว23101', name: 'วิทยาศาสตร์ 5', department: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic', teacherId: 'tch-01', teacherName: 'ครูสุพรรณ เมืองทอง' },
+  { id: 'sbj-math31', code: 'ค23101', name: 'คณิตศาสตร์พื้นฐาน 5', department: 'กลุ่มสาระการเรียนรู้คณิตศาสตร์', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic', teacherId: 'tch-02', teacherName: 'ครูสมศรี นวลจันทร์' },
+  { id: 'sbj-tha31', code: 'ท23101', name: 'ภาษาไทย 5', department: 'กลุ่มสาระการเรียนรู้ภาษาไทย', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic', teacherId: 'tch-03', teacherName: 'ครูประเสริฐ ดีเลิศ' },
+  { id: 'sbj-eng31', code: 'อ23101', name: 'ภาษาอังกฤษ 5', department: 'กลุ่มสาระการเรียนรู้ภาษาต่างประเทศ', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic', teacherId: 'tch-01', teacherName: 'ครูสุพรรณ เมืองทอง' },
+  { id: 'sbj-soc31', code: 'ส23101', name: 'สังคมศึกษา 5', department: 'กลุ่มสาระการเรียนรู้สังคมศึกษาฯ', level: 'ม.3', credits: 1.5, totalHours: 60, termNumber: 1, academicYearId: 'ay-2569', type: 'basic', teacherId: 'tch-02', teacherName: 'ครูสมศรี นวลจันทร์' },
 ];
 
 export const initialTeachingAssignments: TeachingAssignment[] = [

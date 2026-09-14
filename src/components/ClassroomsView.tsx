@@ -25,14 +25,14 @@ export const ClassroomsView: React.FC<ClassroomsViewProps> = ({
 
   const [name, setName] = useState('');
   const [level, setLevel] = useState('ม.3');
-  const [roomNumber, setRoomNumber] = useState(1);
+  const [roomNumber, setRoomNumber] = useState('1');
   const [advisorId, setAdvisorId] = useState(teachers[0]?.id || '');
 
   const handleOpenAdd = () => {
     setEditingClassroom(null);
     setName('ม.3/2');
     setLevel('ม.3');
-    setRoomNumber(2);
+    setRoomNumber('2');
     setAdvisorId(teachers[0]?.id || '');
     setShowModal(true);
   };
@@ -41,7 +41,7 @@ export const ClassroomsView: React.FC<ClassroomsViewProps> = ({
     setEditingClassroom(c);
     setName(c.name);
     setLevel(c.level);
-    setRoomNumber(c.roomNumber);
+    setRoomNumber(String(c.roomNumber || '1'));
     setAdvisorId(c.advisorTeacherId || '');
     setShowModal(true);
   };
@@ -55,7 +55,7 @@ export const ClassroomsView: React.FC<ClassroomsViewProps> = ({
         ...editingClassroom,
         name,
         level,
-        roomNumber,
+        roomNumber: String(roomNumber),
         advisorTeacherId: advisorId,
         advisorTeacherName: advisor ? `${advisor.title}${advisor.firstName} ${advisor.lastName}` : undefined
       });
@@ -65,7 +65,7 @@ export const ClassroomsView: React.FC<ClassroomsViewProps> = ({
         academicYearId: 'year-2569',
         name,
         level,
-        roomNumber,
+        roomNumber: String(roomNumber),
         advisorTeacherId: advisorId,
         advisorTeacherName: advisor ? `${advisor.title}${advisor.firstName} ${advisor.lastName}` : undefined
       };
@@ -185,9 +185,9 @@ export const ClassroomsView: React.FC<ClassroomsViewProps> = ({
                 <div>
                   <label className="block text-slate-500 font-medium mb-1">ห้องที่</label>
                   <input
-                    type="number"
+                    type="text"
                     value={roomNumber}
-                    onChange={(e) => setRoomNumber(Number(e.target.value))}
+                    onChange={(e) => setRoomNumber(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800"
                   />
                 </div>

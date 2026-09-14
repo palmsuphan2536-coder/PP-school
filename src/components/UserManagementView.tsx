@@ -157,7 +157,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     }
 
     onDeleteUser(deletingUser.id);
-    showToast(`ลบบัญชีผู้ใช้ "${deletingUser.name}" ออกจากระบบแล้ว`);
+    showToast(`ลบบัญชีผู้ใช้ "${deletingUser.name}" และลบออกจากแผ่นงานที่ 7 เรียบร้อยแล้ว`);
     setDeletingUser(null);
   };
 

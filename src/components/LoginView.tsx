@@ -1,90 +1,81 @@
 import React, { useState } from 'react';
 import { 
   School, Lock, User, Eye, EyeOff, LogIn, 
-  ShieldCheck, CheckCircle2, AlertCircle, GraduationCap,
-  Sparkles, Check
+  ShieldCheck, AlertCircle, RefreshCw, Check
 } from 'lucide-react';
-import { SchoolInfo, User as UserType, Teacher } from '../types';
+import { SchoolInfo, User as UserType, Teacher, UserAccount } from '../types';
 
 interface LoginViewProps {
   schoolInfo: SchoolInfo;
-  teachers: Teacher[];
+  teachers?: Teacher[];
+  userAccounts?: UserAccount[];
   onLogin: (user: UserType) => void;
+  onRefreshUsersFromSheet?: () => Promise<{ success: boolean; count?: number; message?: string }>;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
   schoolInfo,
   teachers = [],
+  userAccounts = [],
   onLogin,
+  onRefreshUsersFromSheet
 }) => {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('1234');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Preset quick-login demo accounts with super admin 'admin' / 'admin' first
-  const demoAccounts: {
-    username: string;
-    label: string;
-    roleName: string;
-    roleDesc: string;
-    badgeColor: string;
-    icon: string;
-  }[] = [
-    {
-      username: 'admin',
-      label: 'ผู้ดูแลระบบสูงสุด (Super Admin)',
-      roleName: 'ผู้ดูแลระบบสูงสุด (Super Administrator)',
-      roleDesc: 'ชื่อผู้ใช้: admin | รหัสผ่าน: admin (จัดการระบบ ตารางเรียน ปีการศึกษา และ Google Sheets)',
-      badgeColor: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
-      icon: '👑'
-    },
-    {
-      username: 'director',
-      label: schoolInfo.directorName || 'นายประสิทธิ์ พงษ์พานิช',
-      roleName: 'ผู้อำนวยการสถานศึกษา (Executive)',
-      roleDesc: 'อนุมัติผลการเรียน ปพ.5 และดูรายงานภาพรวมทั้งโรงเรียน',
-      badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
-      icon: '🏛️'
-    },
-    {
-      username: 'prasert',
-      label: 'นายประเสริฐ ดีเลิศ',
-      roleName: 'หัวหน้างานวิชาการ/ทะเบียน (Academic)',
-      roleDesc: 'จัดการหลักสูตร ตรวจสอบผลการเรียน และปิดภาคเรียน',
-      badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
-      icon: '📚'
-    },
-    {
-      username: 'suphan',
-      label: 'นายสุพรรณ เมืองทอง',
-      roleName: 'ครูผู้สอน / ครูประจำชั้น (Teacher)',
-      roleDesc: 'เช็คชื่อเวลาเรียน บันทึกคะแนนเก็บ และประเมินผล ปพ.5',
-      badgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
-      icon: '👨‍🏫'
-    }
-  ];
-
-  const handleQuickLogin = (uname: string) => {
-    setErrorMsg(null);
-    setUsername(uname);
-    const pass = uname === 'admin' ? '1234' : '123456';
-    setPassword(pass);
-
-    setIsLoading(true);
-    setTimeout(() => {
-      executeLogin(uname, pass);
-      setIsLoading(false);
-    }, 350);
-  };
+  const [isRefreshingSheet, setIsRefreshingSheet] = useState(false);
 
   const executeLogin = (userToLogin: string, passEntered?: string) => {
     const trimmed = userToLogin.trim().toLowerCase();
     const enteredPass = passEntered !== undefined ? passEntered : password;
 
-    // 1. Super Admin default account: admin / 1234
+    const safeAccounts = Array.isArray(userAccounts) ? userAccounts : [];
+
+    // 1. Primary: Validate against User Accounts (ข้อมูลจัดการผู้ใช้ / แผ่นงานที่ 7)
+    const matchedAccount = safeAccounts.find(
+      u => u.username?.trim().toLowerCase() === trimmed
+    );
+
+    if (matchedAccount) {
+      if (matchedAccount.status === 'inactive' || matchedAccount.status === 'suspended') {
+        setErrorMsg('บัญชีผู้ใช้นี้ถูกระงับการใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ');
+        return;
+      }
+
+      if (matchedAccount.password !== enteredPass) {
+        setErrorMsg('รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านอีกครั้ง');
+        return;
+      }
+
+      const authUser: UserType = {
+        id: matchedAccount.id,
+        username: matchedAccount.username,
+        name: matchedAccount.name,
+        role: matchedAccount.role,
+        email: matchedAccount.email || '',
+        position: matchedAccount.position || 'ผู้ใช้งานระบบ',
+        department: matchedAccount.department || 'งานเทคโนโลยีสารสนเทศ'
+      };
+
+      if (rememberMe) {
+        try {
+          localStorage.setItem('WATRAT_AUTH_USER', JSON.stringify(authUser));
+        } catch {}
+      } else {
+        try {
+          sessionStorage.setItem('WATRAT_AUTH_USER', JSON.stringify(authUser));
+        } catch {}
+      }
+
+      onLogin(authUser);
+      return;
+    }
+
+    // 2. Default Super Admin account: admin / 1234 (if not custom defined above)
     if (trimmed === 'admin') {
       if (enteredPass && enteredPass !== '1234' && enteredPass !== 'admin') {
         setErrorMsg('รหัสผ่านไม่ถูกต้อง สำหรับชื่อผู้ใช้ admin รหัสผ่านเริ่มต้นคือ 1234');
@@ -115,16 +106,22 @@ export const LoginView: React.FC<LoginViewProps> = ({
       return;
     }
 
+    // 3. Fallback: Teachers list
     const safeTeachers = Array.isArray(teachers) ? teachers : [];
     const matchedTeacher = safeTeachers.find(
       t => t?.username?.toLowerCase() === trimmed || t?.teacherCode?.toLowerCase() === trimmed
     );
 
     if (matchedTeacher) {
+      if (enteredPass && enteredPass !== '123456' && enteredPass !== matchedTeacher.teacherCode) {
+        setErrorMsg('รหัสผ่านไม่ถูกต้อง (รหัสผ่านเริ่มต้นของครูคือ 123456 หรือรหัสประจำตัวครู)');
+        return;
+      }
+
       const authUser: UserType = {
         id: matchedTeacher.id,
-        username: matchedTeacher.username,
-        name: `${matchedTeacher.title}${matchedTeacher.firstName} ${matchedTeacher.lastName}`,
+        username: matchedTeacher.username || matchedTeacher.teacherCode,
+        name: `${matchedTeacher.title || ''}${matchedTeacher.firstName} ${matchedTeacher.lastName}`,
         role: matchedTeacher.role,
         email: matchedTeacher.email || '',
         position: matchedTeacher.position,
@@ -142,34 +139,19 @@ export const LoginView: React.FC<LoginViewProps> = ({
       }
 
       onLogin(authUser);
-    } else {
-      // Fallback user if typing a custom name
-      const fallbackUser: UserType = {
-        id: 'user-' + Date.now(),
-        username: trimmed || 'teacher',
-        name: trimmed === 'director' ? (schoolInfo.directorName || 'ผู้อำนวยการสถานศึกษา') : 'ครูผู้ใช้งานระบบ',
-        role: trimmed === 'director' ? 'executive' : 'teacher',
-        email: `${trimmed}@watrat.ac.th`,
-        position: 'ครูผู้สอน',
-        department: 'งานวิชาการ'
-      };
-
-      if (rememberMe) {
-        try {
-          localStorage.setItem('WATRAT_AUTH_USER', JSON.stringify(fallbackUser));
-        } catch {}
-      }
-
-      onLogin(fallbackUser);
+      return;
     }
+
+    setErrorMsg('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง หรือไม่พบชื่อผู้ใช้งานนี้ในระบบ กรุณาตรวจสอบข้อมูลอีกครั้ง');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setSuccessNotice(null);
 
     if (!username.trim()) {
-      setErrorMsg('กรุณากรอกชื่อผู้ใช้งาน หรือเลือกลงชื่อเข้าใช้ด่วน');
+      setErrorMsg('กรุณากรอกชื่อผู้ใช้งาน');
       return;
     }
 
@@ -177,7 +159,26 @@ export const LoginView: React.FC<LoginViewProps> = ({
     setTimeout(() => {
       executeLogin(username, password);
       setIsLoading(false);
-    }, 400);
+    }, 300);
+  };
+
+  const handleSyncFromSheet = async () => {
+    if (!onRefreshUsersFromSheet) return;
+    setIsRefreshingSheet(true);
+    setErrorMsg(null);
+    setSuccessNotice(null);
+    try {
+      const res = await onRefreshUsersFromSheet();
+      if (res.success) {
+        setSuccessNotice(res.message || `ดึงข้อมูลบัญชีผู้ใช้จากแผ่นงานที่ 7 สำเร็จ (${res.count || 0} บัญชี)`);
+      } else {
+        setErrorMsg(res.message || 'ไม่สามารถดึงข้อมูลจากชีตได้ กรุณาตรวจสอบการเชื่อมต่อ');
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets');
+    } finally {
+      setIsRefreshingSheet(false);
+    }
   };
 
   return (
@@ -194,12 +195,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
       </div>
 
       {/* Main Login Center Card */}
-      <div className="w-full max-w-4xl mx-auto my-auto py-8">
+      <div className="w-full max-w-4xl mx-auto my-auto py-6">
         <div className="bg-white text-slate-800 rounded-3xl shadow-2xl border border-slate-100 overflow-hidden grid grid-cols-1 lg:grid-cols-12">
           
           {/* Left Hero Brand Panel (5 Cols) */}
           <div className="lg:col-span-5 bg-linear-to-br from-indigo-700 via-indigo-800 to-slate-900 text-white p-8 flex flex-col justify-between relative overflow-hidden">
-            {/* Subtle background decoration */}
             <div className="absolute -top-24 -right-24 w-60 h-60 rounded-full bg-indigo-500/20 blur-2xl pointer-events-none" />
             <div className="absolute -bottom-24 -left-24 w-60 h-60 rounded-full bg-blue-500/20 blur-2xl pointer-events-none" />
 
@@ -236,19 +236,19 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
                   <Check className="w-3.5 h-3.5 text-emerald-300" />
                 </div>
-                <span>บันทึกคะแนนเก็บ กลางภาค และปลายภาค อัตโนมัติ</span>
+                <span>ตรวจสอบสิทธิ์ผ่านข้อมูลจัดการผู้ใช้และแผ่นงานที่ 7</span>
               </div>
               <div className="flex items-center gap-2.5 text-indigo-100">
                 <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
                   <Check className="w-3.5 h-3.5 text-emerald-300" />
                 </div>
-                <span>เช็คชื่อเวลาเรียน คำนวณเกณฑ์ มส. 80% ทันที</span>
+                <span>เช็คชื่อเวลาเรียน คำนวณเกณฑ์ มส. 80% อัตโนมัติ</span>
               </div>
               <div className="flex items-center gap-2.5 text-indigo-100">
                 <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
                   <Check className="w-3.5 h-3.5 text-emerald-300" />
                 </div>
-                <span>พิมพ์เอกสาร ปพ.5 สมบูรณ์พร้อมระบบลงนามอิเล็กทรอนิกส์</span>
+                <span>บันทึกคะแนนและพิมพ์เอกสาร ปพ.5 สมบูรณ์</span>
               </div>
             </div>
 
@@ -266,12 +266,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 <div>
                   <h3 className="text-xl font-bold text-slate-900">ลงชื่อเข้าสู่ระบบ</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    เข้าสู่ระบบเพื่อจัดการเวลาเรียน คะแนน และเอกสาร ปพ.5
+                    ใช้ข้อมูลจากระบบจัดการผู้ใช้ หรือแผ่นงานที่ 7 (Google Sheets)
                   </p>
                 </div>
-                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>ระบบพร้อมใช้งาน</span>
+                  <span>แผ่นงานที่ 7 ซิงค์พร้อม</span>
                 </div>
               </div>
 
@@ -283,11 +283,19 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 </div>
               )}
 
+              {/* Success Notice */}
+              {successNotice && (
+                <div className="mt-4 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center gap-2.5">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{successNotice}</span>
+                </div>
+              )}
+
               {/* Login Form */}
               <form onSubmit={handleSubmit} className="mt-6 space-y-4 text-xs">
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1.5">
-                    ชื่อผู้ใช้งาน (Username / รหัสประจำตัวครู)
+                    ชื่อผู้ใช้งาน (Username / รหัสประจำตัว)
                   </label>
                   <div className="relative">
                     <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -296,7 +304,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                       required
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="เช่น suphan, prasert, director, admin"
+                      placeholder="เช่น admin, หรือชื่อผู้ใช้ที่สร้างในแผ่นงานที่ 7"
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-xs transition"
                     />
                   </div>
@@ -307,8 +315,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     <label className="text-slate-700 font-semibold">
                       รหัสผ่าน (Password)
                     </label>
-                    <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      Super Admin: admin / admin
+                    <span className="text-[11px] text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                      แผ่นงานที่ 7 (บัญชีผู้ใช้และรหัสผ่าน)
                     </span>
                   </div>
                   <div className="relative">
@@ -341,53 +349,36 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     <span>จดจำการเข้าสู่ระบบบนอุปกรณ์นี้</span>
                   </label>
 
-                  <span className="text-slate-400 text-[11px]">
-                    ระบบจัดเก็บข้อมูลในตัวเครื่อง
-                  </span>
+                  {onRefreshUsersFromSheet && (
+                    <button
+                      type="button"
+                      onClick={handleSyncFromSheet}
+                      disabled={isRefreshingSheet}
+                      className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 transition disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isRefreshingSheet ? 'animate-spin' : ''}`} />
+                      <span>{isRefreshingSheet ? 'กำลังดึงชีตที่ 7...' : 'ดึงผู้ใช้จากชีตที่ 7'}</span>
+                    </button>
+                  )}
                 </div>
 
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-2 mt-2 disabled:opacity-60"
+                  className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-2 mt-2 disabled:opacity-60 cursor-pointer"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>{isLoading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ (Sign In)'}</span>
+                  <span>{isLoading ? 'กำลังตรวจสอบสิทธิ์...' : 'เข้าสู่ระบบ (Sign In)'}</span>
                 </button>
               </form>
-            </div>
 
-            {/* Quick Login Persona Selector */}
-            <div className="mt-6 pt-5 border-t border-slate-100 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>เลือกลงชื่อเข้าใช้ด่วนตามบทบาท (Quick Access Demo)</span>
+              {/* Security Guidance Note */}
+              <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>ระบบรักษาความปลอดภัยบัญชีผู้ใช้ตามมาตรฐานความปลอดภัย</span>
                 </span>
-                <span className="text-[10px] text-slate-400">คลิกเพื่อเข้าใช้งานทันที</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {demoAccounts.map((account) => (
-                  <button
-                    key={account.username}
-                    type="button"
-                    onClick={() => handleQuickLogin(account.username)}
-                    className="p-2.5 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 transition text-left flex items-start gap-2.5 group"
-                  >
-                    <span className="text-xl shrink-0 p-1 bg-slate-50 rounded-lg group-hover:scale-110 transition">
-                      {account.icon}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="font-bold text-slate-900 text-xs truncate group-hover:text-indigo-700">
-                        {account.label}
-                      </div>
-                      <div className="text-[10px] text-slate-500 truncate">
-                        {account.roleName}
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                <span className="text-slate-400 text-[10px]">ปพ.5 ออนไลน์</span>
               </div>
             </div>
 

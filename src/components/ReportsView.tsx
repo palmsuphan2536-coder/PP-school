@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { BarChart3, Download, Printer, Filter, BookOpen, School, Users, CheckCircle2, FileDown, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { captureSafeCanvas } from '../utils/pdfCanvas';
 import { 
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, 
   CartesianGrid, PieChart, Pie, Cell, Legend 
@@ -99,9 +99,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const elem = document.getElementById('report-printable-area');
       if (!elem) throw new Error('Not found');
 
-      const canvas = await html2canvas(elem, {
+      const canvas = await captureSafeCanvas(elem, {
         scale: 1.5,
-        useCORS: true,
         backgroundColor: '#ffffff'
       });
 

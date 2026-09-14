@@ -31,7 +31,7 @@ export interface UserAccount {
   email: string;
   position: string;
   department: string;
-  status: 'active' | 'suspended';
+  status: 'active' | 'suspended' | 'inactive';
   description?: string;
 }
 
@@ -69,6 +69,7 @@ export interface Term {
   endDate: string;
   isCurrent: boolean;
   isClosed: boolean;
+  name?: string;
 }
 
 export interface Classroom {
@@ -79,11 +80,13 @@ export interface Classroom {
   academicYearId: string;
   advisorTeacherId?: string;
   advisorTeacherName?: string;
+  homeroomTeacherName?: string;
   studentCount?: number;
 }
 
 export type StudentStatus = 
   | 'studying'        // กำลังเรียน
+  | 'active'          // กำลังเรียน
   | 'transferred_in'  // ย้ายเข้า
   | 'transferred_out' // ย้ายออก
   | 'graduated'       // จบการศึกษา
@@ -122,9 +125,11 @@ export interface Teacher {
   phone?: string;
   email?: string;
   status: 'active' | 'inactive';
+  homeroomClassroomId?: string; // ห้องประจำชั้น ID
+  homeroomClassroomName?: string; // ชื่อห้องประจำชั้น (เช่น ม.3/1)
 }
 
-export type SubjectType = 'basic' | 'additional' | 'activity' | 'other';
+export type SubjectType = 'basic' | 'additional' | 'activity' | 'core' | 'other';
 
 export interface Subject {
   id: string;
@@ -137,6 +142,10 @@ export interface Subject {
   termNumber: 1 | 2;
   academicYearId: string;
   type: SubjectType;
+  teacherId?: string;           // รหัสครูผู้สอน
+  teacherName?: string;         // ชื่อ-สกุล ครูผู้สอน เช่น 'ครูสุพรรณ เมืองทอง'
+  periodsPerWeek?: number;
+  classroomId?: string;
 }
 
 export interface TeachingAssignment {
@@ -159,16 +168,23 @@ export type CalendarEventType =
   | 'activity_day'    // วันกิจกรรม
   | 'exam_day'        // วันสอบ
   | 'meeting_day'     // วันประชุม
-  | 'term_break';     // ปิดภาคเรียน
+  | 'term_break'      // ปิดภาคเรียน
+  | 'holiday'
+  | 'activity'
+  | 'exam'
+  | 'other';
 
 export interface CalendarEvent {
   id: string;
   academicYearId: string;
   termId: string;
-  date: string;                 // YYYY-MM-DD
+  date?: string;                 // YYYY-MM-DD
+  startDate?: string;
+  endDate?: string;
   title: string;
   type: CalendarEventType;
   isSchoolDay: boolean;
+  description?: string;
 }
 
 export interface TimetableSlot {
@@ -178,6 +194,7 @@ export interface TimetableSlot {
   teacherId: string;
   dayOfWeek: 1 | 2 | 3 | 4 | 5; // 1=จันทร์ .. 5=ศุกร์
   period: number;               // 1..8
+  periodNumber?: number;
   startTime: string;            // '08:30'
   endTime: string;              // '09:30'
   room?: string;
@@ -215,6 +232,7 @@ export interface ScoreComponent {
   name: string;                 // e.g. 'ใบงาน/ชิ้นงาน', 'ทดสอบย่อย', 'สอบกลางภาค', 'สอบปลายภาค'
   maxScore: number;             // e.g. 20, 20, 10, 20, 30
   sequence: number;
+  type?: string;
 }
 
 export interface ScoreRecord {
@@ -227,6 +245,7 @@ export interface ScoreRecord {
   termId: string;
   lastUpdated: string;
   updatedBy: string;
+  updatedAt?: string;
 }
 
 export type SpecialGrade = 'ร' | 'มส' | 'มผ' | 'ผ' | '0';
@@ -235,6 +254,8 @@ export type AcademicGrade = '4' | '3.5' | '3' | '2.5' | '2' | '1.5' | '1' | '0' 
 export interface GradingRule {
   minScore: number;
   grade: string;
+  maxScore?: number;
+  meaning?: string;
 }
 
 export type ApprovalStatus = 'draft' | 'submitted' | 'approved' | 'locked';
@@ -321,9 +342,11 @@ export interface AuditLog {
   userName: string;
   userRole: UserRole;
   action: string;               // 'update_score', 'check_attendance', 'approve_grade', 'lock_term', etc.
-  entityType: 'score' | 'attendance' | 'grade' | 'student' | 'system' | 'lock' | 'subject';
+  entityType: 'score' | 'attendance' | 'grade' | 'student' | 'system' | 'lock' | 'subject' | string;
   entityId: string;
   details: string;
+  targetType?: string;
+  oldValue?: string;
   previousValue?: string;
   newValue?: string;
 }
@@ -333,8 +356,9 @@ export interface SystemNotification {
   timestamp: string;
   title: string;
   message: string;
-  type: 'warning' | 'info' | 'success' | 'danger';
+  type: 'warning' | 'info' | 'success' | 'danger' | 'alert' | 'score_edited' | 'workflow' | 'system' | string;
   isRead: boolean;
+  read?: boolean;
   link?: string;
 }
 

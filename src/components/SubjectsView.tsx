@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, Plus, Search, Edit, Trash2, Clock, Award } from 'lucide-react';
+import { BookOpen, Plus, Search, Edit, Trash2, Clock, Award, UserCheck } from 'lucide-react';
 import { Subject, Teacher } from '../types';
 
 interface SubjectsViewProps {
@@ -30,36 +30,61 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     credits: 1.5,
     totalHours: 60,
     teacherId: teachers[0]?.id || '',
+    teacherName: teachers[0] ? `${teachers[0].title || ''}${teachers[0].firstName} ${teachers[0].lastName}`.trim() : '',
     termNumber: 1,
-    academicYearId: 'year-2569'
+    academicYearId: 'year-2569',
+    type: 'basic'
   });
+
+  const getTeacherDisplayName = (subj: Subject) => {
+    if (subj.teacherName) return subj.teacherName;
+    if (subj.teacherId) {
+      const tch = teachers.find(t => t.id === subj.teacherId);
+      if (tch) return `${tch.title || ''}${tch.firstName} ${tch.lastName}`.trim();
+    }
+    return '';
+  };
 
   const filteredSubjects = subjects.filter(s => {
     const q = search.toLowerCase();
+    const tName = getTeacherDisplayName(s).toLowerCase();
     return s.code.toLowerCase().includes(q) ||
            s.name.toLowerCase().includes(q) ||
-           s.department.toLowerCase().includes(q);
+           s.department.toLowerCase().includes(q) ||
+           tName.includes(q);
   });
 
   const handleOpenAdd = () => {
     setEditingSubject(null);
+    const defaultTch = teachers[0];
+    const defaultTchName = defaultTch 
+      ? `${defaultTch.title || ''}${defaultTch.firstName} ${defaultTch.lastName}`.trim() 
+      : '';
     setFormData({
-      code: 'ส23101',
-      name: 'สังคมศึกษา 5',
-      department: 'กลุ่มสาระการเรียนรู้สังคมศึกษา ศาสนา และวัฒนธรรม',
+      code: '',
+      name: '',
+      department: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี',
       level: 'ม.3',
       credits: 1.5,
       totalHours: 60,
-      teacherId: teachers[0]?.id || '',
+      teacherId: defaultTch?.id || '',
+      teacherName: defaultTchName,
       termNumber: 1,
-      academicYearId: 'year-2569'
+      academicYearId: 'year-2569',
+      type: 'basic'
     });
     setShowModal(true);
   };
 
   const handleOpenEdit = (s: Subject) => {
     setEditingSubject(s);
-    setFormData({ ...s });
+    const tch = teachers.find(t => t.id === s.teacherId);
+    const tchName = s.teacherName || (tch ? `${tch.title || ''}${tch.firstName} ${tch.lastName}`.trim() : '');
+    setFormData({ 
+      ...s,
+      teacherId: s.teacherId || '',
+      teacherName: tchName
+    });
     setShowModal(true);
   };
 
@@ -70,20 +95,32 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
       return;
     }
 
+    const selectedTeacher = teachers.find(t => t.id === formData.teacherId);
+    const teacherName = selectedTeacher 
+      ? `${selectedTeacher.title || ''}${selectedTeacher.firstName} ${selectedTeacher.lastName}`.trim()
+      : (formData.teacherName || '');
+
     if (editingSubject) {
-      onUpdateSubject({ ...editingSubject, ...formData } as Subject);
+      onUpdateSubject({ 
+        ...editingSubject, 
+        ...formData,
+        teacherId: formData.teacherId || '',
+        teacherName: teacherName
+      } as Subject);
     } else {
       const newSubj: Subject = {
         id: `sbj-${Date.now()}`,
-        code: formData.code!,
-        name: formData.name!,
+        code: formData.code.trim().toUpperCase(),
+        name: formData.name.trim(),
         department: formData.department || 'กลุ่มสาระการเรียนรู้ทั่วไป',
         level: formData.level || 'ม.3',
         credits: Number(formData.credits) || 1.5,
         totalHours: Number(formData.totalHours) || 60,
         termNumber: (Number(formData.termNumber) === 2 ? 2 : 1) as 1 | 2,
         academicYearId: 'year-2569',
-        type: (formData.type as any) || 'basic'
+        type: (formData.type as any) || 'basic',
+        teacherId: formData.teacherId || '',
+        teacherName: teacherName
       };
       onAddSubject(newSubj);
     }
@@ -135,6 +172,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                 <th className="py-3 px-3 w-24">รหัสวิชา</th>
                 <th className="py-3 px-3">ชื่อรายวิชา</th>
                 <th className="py-3 px-3">กลุ่มสาระการเรียนรู้</th>
+                <th className="py-3 px-3">ครูผู้สอน (ปพ.5)</th>
                 <th className="py-3 px-3 text-center w-20">ระดับชั้น</th>
                 <th className="py-3 px-3 text-center w-20">หน่วยกิต</th>
                 <th className="py-3 px-3 text-center w-24">เวลาเรียน (ชม.)</th>
@@ -142,34 +180,47 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {filteredSubjects.map((s) => (
-                <tr key={s.id} className="hover:bg-slate-50 transition">
-                  <td className="py-2.5 px-3 font-mono font-bold text-indigo-700">{s.code}</td>
-                  <td className="py-2.5 px-3 font-semibold text-slate-900">{s.name}</td>
-                  <td className="py-2.5 px-3 text-slate-600">{s.department}</td>
-                  <td className="py-2.5 px-3 text-center font-medium">{s.level}</td>
-                  <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800">{s.credits}</td>
-                  <td className="py-2.5 px-3 text-center font-mono text-slate-600">{s.totalHours} ชม.</td>
-                  <td className="py-2.5 px-3 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        onClick={() => handleOpenEdit(s)}
-                        className="p-1 text-slate-500 hover:text-blue-600 rounded"
-                        title="แก้ไขวิชา"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => setDeletingSubject(s)}
-                        className="p-1 text-slate-500 hover:text-rose-600 rounded"
-                        title="ลบวิชา"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filteredSubjects.map((s) => {
+                const teacherName = getTeacherDisplayName(s);
+                return (
+                  <tr key={s.id} className="hover:bg-slate-50 transition">
+                    <td className="py-2.5 px-3 font-mono font-bold text-indigo-700">{s.code}</td>
+                    <td className="py-2.5 px-3 font-semibold text-slate-900">{s.name}</td>
+                    <td className="py-2.5 px-3 text-slate-600">{s.department}</td>
+                    <td className="py-2.5 px-3">
+                      {teacherName ? (
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-50/80 text-indigo-900 border border-indigo-100 font-medium">
+                          <UserCheck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          <span className="truncate max-w-[160px]">{teacherName}</span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">ยังไม่กำหนดครูผู้สอน</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-medium">{s.level}</td>
+                    <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800">{s.credits}</td>
+                    <td className="py-2.5 px-3 text-center font-mono text-slate-600">{s.totalHours} ชม.</td>
+                    <td className="py-2.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => handleOpenEdit(s)}
+                          className="p-1 text-slate-500 hover:text-blue-600 rounded"
+                          title="แก้ไขวิชา"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setDeletingSubject(s)}
+                          className="p-1 text-slate-500 hover:text-rose-600 rounded"
+                          title="ลบวิชา"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -188,52 +239,84 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-slate-500 font-medium mb-1">รหัสวิชา</label>
+                  <label className="block text-slate-600 font-medium mb-1">รหัสวิชา *</label>
                   <input
                     type="text"
                     required
                     value={formData.code}
                     onChange={(e) => setFormData({ ...formData, code: e.target.value })}
                     placeholder="เช่น ว23101"
-                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-mono uppercase"
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-mono uppercase focus:bg-white focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-medium mb-1">ระดับชั้น</label>
+                  <label className="block text-slate-600 font-medium mb-1">ระดับชั้น</label>
                   <input
                     type="text"
                     value={formData.level}
                     onChange={(e) => setFormData({ ...formData, level: e.target.value })}
-                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800"
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-500 font-medium mb-1">ชื่อรายวิชา</label>
+                <label className="block text-slate-600 font-medium mb-1">ชื่อรายวิชา *</label>
                 <input
                   type="text"
                   required
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="เช่น วิทยาศาสตร์ 5"
-                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-medium"
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
+              {/* ครูผู้สอนประจำรายวิชา (เพื่อไปปรากฏในข้อมูล ปพ.5) */}
+              <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/80">
+                <label className="block text-indigo-950 font-semibold mb-1 flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4 text-indigo-600" />
+                  <span>ครูผู้สอนประจำรายวิชา (จะนำไปแสดงในแบบ ปพ.5) *</span>
+                </label>
+                <select
+                  value={formData.teacherId || ''}
+                  onChange={(e) => {
+                    const tId = e.target.value;
+                    const tch = teachers.find(t => t.id === tId);
+                    const tName = tch ? `${tch.title || ''}${tch.firstName} ${tch.lastName}`.trim() : '';
+                    setFormData({
+                      ...formData,
+                      teacherId: tId,
+                      teacherName: tName
+                    });
+                  }}
+                  className="w-full px-2.5 py-2 bg-white border border-indigo-200 rounded-lg text-slate-800 font-medium text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">-- ยังไม่ระบุครูผู้สอน --</option>
+                  {teachers.map((tch) => (
+                    <option key={tch.id} value={tch.id}>
+                      {tch.title}{tch.firstName} {tch.lastName} ({tch.department || tch.position})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-indigo-700/80 mt-1">
+                  ชื่อครูผู้สอนจะถูกนำไปลงในปก ปพ.5, บันทึกเวลาเรียน, การตัดสินผลการเรียน และช่องลงลายมือชื่ออัตโนมัติ
+                </p>
+              </div>
+
               <div>
-                <label className="block text-slate-500 font-medium mb-1">กลุ่มสาระการเรียนรู้</label>
+                <label className="block text-slate-600 font-medium mb-1">กลุ่มสาระการเรียนรู้</label>
                 <input
                   type="text"
                   value={formData.department}
                   onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800"
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-slate-500 font-medium mb-1">หน่วยกิต</label>
+                  <label className="block text-slate-600 font-medium mb-1">หน่วยกิต</label>
                   <input
                     type="number"
                     step="0.5"
@@ -241,17 +324,17 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                     max="5"
                     value={formData.credits}
                     onChange={(e) => setFormData({ ...formData, credits: Number(e.target.value) })}
-                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-mono"
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-mono focus:bg-white focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-medium mb-1">จำนวนชั่วโมงเรียนต่อภาค</label>
+                  <label className="block text-slate-600 font-medium mb-1">จำนวนชั่วโมงเรียนต่อภาค</label>
                   <input
                     type="number"
                     min="1"
                     value={formData.totalHours}
                     onChange={(e) => setFormData({ ...formData, totalHours: Number(e.target.value) })}
-                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-mono"
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-mono focus:bg-white focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
