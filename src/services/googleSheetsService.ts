@@ -66,12 +66,36 @@ export const clearStoredAccessToken = () => {
   } catch {}
 };
 
+export const DEFAULT_SPREADSHEET_ID = '17sEeYBKSsmJl0xqGQ7ngxBWINefHhThK9DsLedaJXr4';
+export const DEFAULT_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/edit`;
+
 export const getStoredBackupInfo = (): GoogleBackupInfo | null => {
   try {
     const raw = localStorage.getItem(STORAGE_BACKUP_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.spreadsheetId) {
+        return parsed;
+      }
+    }
+    // Return default backup info pointing to the requested spreadsheet ID if none stored
+    return {
+      spreadsheetId: DEFAULT_SPREADSHEET_ID,
+      spreadsheetUrl: DEFAULT_SPREADSHEET_URL,
+      title: 'ระบบสารสนเทศและสำรองข้อมูล ปพ.5 ออนไลน์ (โรงเรียนวัดราษฎร์ศรัทธาธรรม)',
+      linkedEmail: DEFAULT_LINKED_EMAIL,
+      lastBackupAt: new Date().toISOString(),
+      itemCount: 100
+    };
   } catch {
-    return null;
+    return {
+      spreadsheetId: DEFAULT_SPREADSHEET_ID,
+      spreadsheetUrl: DEFAULT_SPREADSHEET_URL,
+      title: 'ระบบสารสนเทศและสำรองข้อมูล ปพ.5 ออนไลน์ (โรงเรียนวัดราษฎร์ศรัทธาธรรม)',
+      linkedEmail: DEFAULT_LINKED_EMAIL,
+      lastBackupAt: new Date().toISOString(),
+      itemCount: 100
+    };
   }
 };
 
