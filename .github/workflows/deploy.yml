@@ -3,7 +3,6 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [ main ]
-
   workflow_dispatch:
 
 permissions:
@@ -26,10 +25,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'bun' # หรือเปลี่ยนเป็น 'npm' ตามแพ็กเกจที่คุณใช้
 
       - name: Install dependencies
-        run: npm install # หรือใช้ bun install
+        run: npm install --legacy-peer-deps
 
       - name: Build
         run: npm run build
